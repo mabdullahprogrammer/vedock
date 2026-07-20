@@ -39,6 +39,9 @@ def test_installer_folder_result_and_html_use_a_real_input_name():
 def test_installer_reuses_a_saved_custom_install(monkeypatch, tmp_path):
     import json
     from installer.vedock_installer import CLIENT_VERSION, InstallerBridge
+    from vedock_cli import CONNECTED_CLIENT_VERSION
+
+    assert CLIENT_VERSION == CONNECTED_CLIENT_VERSION
 
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     location = tmp_path / "custom-vedock"

@@ -48,6 +48,36 @@ def test_claimed_task_can_be_released_by_its_device(registered_client, app, tmp_
         assert saved.current_stage == "waiting_for_device"
 
 
+def test_outdated_connected_client_is_stopped_before_claim(registered_client, app, tmp_path):
+    with app.app_context():
+        owner = User.query.filter_by(username="tester").one()
+        job = Job(
+            owner=owner,
+            job_type="training",
+            status="awaiting_device",
+            progress=0,
+            current_stage="waiting_for_device",
+            config_json={},
+            logs_path=str(tmp_path / "outdated-client.jsonl"),
+        )
+        db.session.add(job)
+        db.session.commit()
+        job_id = job.id
+    response = registered_client.post(
+        f"/api/v1/jobs/{job_id}/claim",
+        json={"device_id": "old-device", "device_name": "Old Vedock"},
+        headers={"X-Vedock-Client-Version": "2026.07.20.4"},
+    )
+    assert response.status_code == 426
+    error = response.get_json()["error"]
+    assert error["code"] == "client_update_required"
+    assert error["details"]["minimum"] == app.config["MIN_CONNECTED_CLIENT_VERSION"]
+    with app.app_context():
+        saved = db.session.get(Job, job_id)
+        assert saved.status == "awaiting_device"
+        assert saved.claimed_by_device is None
+
+
 def test_dataset_recommendations_and_portable_exports(registered_client):
     source = b"prompt,response\n Hello ,World\n Hello ,World\n,Missing prompt\n"
     imported = registered_client.post(

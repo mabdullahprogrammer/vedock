@@ -13,6 +13,8 @@ from typing import Any
 import click
 import requests
 
+from vedock_cli import CONNECTED_CLIENT_VERSION
+
 
 APP_NAME = os.getenv("APP_NAME", "Vedock")
 CLI_NAME = os.getenv("CLI_NAME", "vedock")
@@ -53,6 +55,7 @@ class Client:
 
     def request(self, method: str, path: str, *, raw: bool = False, **kwargs: Any) -> Any:
         headers = kwargs.pop("headers", {})
+        headers.setdefault("X-Vedock-Client-Version", CONNECTED_CLIENT_VERSION)
         token = self.config.get("token")
         if token:
             headers["Authorization"] = f"Bearer {token}"

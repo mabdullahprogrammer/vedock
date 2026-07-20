@@ -183,32 +183,8 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
             ),
             None,
         )
-        if existing_model and existing_job:
-            existing_version = ModelVersion.query.filter_by(model_id=existing_model.id).order_by(ModelVersion.version_number.desc()).first()
-            existing_dataset = db.session.get(DatasetVersion, (existing_job.config_json or {}).get("dataset_version_id"))
-            if existing_version and existing_dataset and Path(existing_dataset.storage_path).is_file():
-                existing_model.name = model_info["name"]
-                existing_model.source_path = model_reference
-                existing_version.storage_path = model_reference
-                existing_version.config_json = model_info.get("version_config") or {}
-                existing_job.status = "queued"
-                existing_job.progress = 0
-                existing_job.current_stage = "queued"
-                existing_job.error_message = None
-                existing_job.cancel_requested = False
-                existing_job.result_model_version_id = None
-                existing_job.config_json = {
-                    **(existing_job.config_json or {}),
-                    "model_id": existing_model.id,
-                    "base_model_version_id": existing_version.id,
-                    "dataset_version_id": existing_dataset.id,
-                    "runtime": manifest["runtime"],
-                    "task_type": manifest["task_type"],
-                    "parameters": manifest["parameters"],
-                }
-                db.session.commit()
-                return database, storage, existing_job.id, Path(existing_job.logs_path or workspace / "local-job.jsonl")
-        model = ModelRecord(
+        log_path = workspace / "local-job.jsonl"
+        model = existing_model or ModelRecord(
             owner=user,
             slug=f"remote-base-{remote_job_id[:8]}",
             name=model_info["name"],
@@ -219,7 +195,13 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
             source_path=model_reference,
             visibility="private",
         )
-        version = ModelVersion(
+        model.name = model_info["name"]
+        model.source_path = model_reference
+        version = (
+            ModelVersion.query.filter_by(model_id=model.id).order_by(ModelVersion.version_number.desc()).first()
+            if existing_model
+            else None
+        ) or ModelVersion(
             model=model,
             version_number=1,
             label="Remote task base",
@@ -227,55 +209,79 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
             status="completed",
             config_json=model_info.get("version_config") or {},
         )
-        raw = RawDataset(
-            owner=user,
-            name=manifest["dataset"]["name"],
-            source_type="remote_task",
-            original_filename="dataset.jsonl",
-            storage_path=str(dataset_path.with_name(f"raw-{new_id()}.jsonl")),
-            file_format="jsonl",
-            size_bytes=dataset_path.stat().st_size,
-            sha256=expected_hash or "0" * 64,
-            inspection_status="completed",
-            row_count=int(manifest["dataset"].get("rows") or 0),
-        )
-        Path(raw.storage_path).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(dataset_path, raw.storage_path)
-        dataset = DatasetVersion(
-            raw_dataset=raw,
-            owner=user,
-            version_number=1,
-            output_format=manifest["dataset"]["schema"],
-            storage_path=str(dataset_path),
-            validation_status="valid",
-            validation_json={"status": "valid", "source": "authenticated_remote_task"},
-            row_count=int(manifest["dataset"].get("rows") or 0),
-            invalid_row_count=0,
-            token_estimate=0,
-            sha256=expected_hash or "0" * 64,
-        )
-        local_job_id = new_id()
-        log_path = workspace / "local-job.jsonl"
-        job = Job(
-            id=local_job_id,
-            owner=user,
-            job_type="training",
-            status="queued",
-            progress=0,
-            current_stage="queued",
-            logs_path=str(log_path),
-            config_json={
-                "remote_job_id": remote_job_id,
-                "model_id": model.id,
-                "base_model_version_id": version.id,
-                "dataset_version_id": dataset.id,
-                "runtime": manifest["runtime"],
-                "task_type": manifest["task_type"],
-                "parameters": manifest["parameters"],
-            },
-        )
-        db.session.add_all([model, version, raw, dataset, job])
+        version.storage_path = model_reference
+        version.config_json = model_info.get("version_config") or {}
+        db.session.add_all([model, version])
+
+        # Older clients could commit the mirrored resources while writing null
+        # resource IDs into the local job configuration. Recover those records
+        # by their immutable local dataset path instead of creating duplicates.
+        configured_dataset_id = (existing_job.config_json or {}).get("dataset_version_id") if existing_job else None
+        dataset = db.session.get(DatasetVersion, configured_dataset_id) if configured_dataset_id else None
+        if not dataset:
+            dataset = (
+                DatasetVersion.query.filter_by(owner_id=user.id, storage_path=str(dataset_path))
+                .order_by(DatasetVersion.created_at.desc())
+                .first()
+            )
+        if dataset and not Path(dataset.storage_path).is_file():
+            dataset = None
+        pending_records: list[Any] = [model, version]
+        if not dataset:
+            raw = RawDataset(
+                owner=user,
+                name=manifest["dataset"]["name"],
+                source_type="remote_task",
+                original_filename="dataset.jsonl",
+                storage_path=str(dataset_path.with_name(f"raw-{new_id()}.jsonl")),
+                file_format="jsonl",
+                size_bytes=dataset_path.stat().st_size,
+                sha256=expected_hash or "0" * 64,
+                inspection_status="completed",
+                row_count=int(manifest["dataset"].get("rows") or 0),
+            )
+            Path(raw.storage_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(dataset_path, raw.storage_path)
+            dataset = DatasetVersion(
+                raw_dataset=raw,
+                owner=user,
+                version_number=1,
+                output_format=manifest["dataset"]["schema"],
+                storage_path=str(dataset_path),
+                validation_status="valid",
+                validation_json={"status": "valid", "source": "authenticated_remote_task"},
+                row_count=int(manifest["dataset"].get("rows") or 0),
+                invalid_row_count=0,
+                token_estimate=0,
+                sha256=expected_hash or "0" * 64,
+            )
+            pending_records.extend([raw, dataset])
+
+        # Flush assigns SQLAlchemy's Python-side UUID defaults before their IDs
+        # are copied into the JSON job configuration.
+        db.session.add_all(pending_records)
+        db.session.flush()
+        job = existing_job or Job(id=new_id(), owner=user, job_type="training")
+        job.status = "queued"
+        job.progress = 0
+        job.current_stage = "queued"
+        job.logs_path = str(log_path)
+        job.error_message = None
+        job.cancel_requested = False
+        job.result_model_version_id = None
+        job.config_json = {
+            **(job.config_json or {}),
+            "remote_job_id": remote_job_id,
+            "model_id": model.id,
+            "base_model_version_id": version.id,
+            "dataset_version_id": dataset.id,
+            "runtime": manifest["runtime"],
+            "task_type": manifest["task_type"],
+            "parameters": manifest["parameters"],
+        }
+        db.session.add(job)
         db.session.commit()
+        local_job_id = job.id
     return database, storage, local_job_id, log_path
 
 

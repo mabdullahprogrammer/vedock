@@ -1,1 +1,2 @@
 __version__ = "0.1.0"
+CONNECTED_CLIENT_VERSION = "2026.07.21.2"

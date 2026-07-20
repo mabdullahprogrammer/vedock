@@ -55,6 +55,13 @@ def failure(message: str, status: int = 400, code: str = "invalid_request", deta
     return jsonify({"ok": False, "error": {"code": code, "message": message, "details": details}}), status
 
 
+def _version_parts(value: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in value.strip().split("."))
+    except (TypeError, ValueError):
+        return ()
+
+
 def local_compute_required():
     if current_app.config.get("NODE_MODE") == "local_compute":
         return None
@@ -868,6 +875,17 @@ def job_claim(job_id: str):
     job = Job.query.filter_by(id=job_id, owner_id=g.api_user.id).first()
     if not job:
         return failure("Job not found.", 404, "not_found")
+    required_version = str(current_app.config.get("MIN_CONNECTED_CLIENT_VERSION") or "")
+    reported_version = request.headers.get("X-Vedock-Client-Version", "")
+    if required_version and _version_parts(reported_version) < _version_parts(required_version):
+        control_plane = str(current_app.config.get("CONTROL_PLANE_URL") or "").rstrip("/")
+        download_url = f"{control_plane}/downloads/vedock-installer.exe" if control_plane else "/downloads/vedock-installer.exe"
+        return failure(
+            "This Vedock connected client is outdated. Install the latest client before running a training task.",
+            426,
+            "client_update_required",
+            {"installed": reported_version or "unknown", "minimum": required_version, "download_url": download_url},
+        )
     payload = request.get_json(silent=True) or {}
     try:
         claimed = claim_job(job, str(payload.get("device_id") or ""), str(payload.get("device_name") or "Vedock device"))
