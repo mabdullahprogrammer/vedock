@@ -18,22 +18,22 @@ The suite covers branding, authentication, protected pages, hosted hardware/path
 
 All Python sources in `vedock`, `vedock_cli`, `installer` and `tests` also passed `compileall`.
 
-## Live hosted checks
+## Hosted-node checks
 
 ```text
 Landing page:                  HTTP 200
 API node mode:                hosted_inference
 API storage location:         private_host_storage
 Windows installer route:      HTTP 200
-Windows installer size:       14,519,043 bytes
-Windows installer SHA-256:    C60D1C0BBF597FC24B0C8FBB45B297E1FAEA80E47141A9491F81CF7D4BD381D1
-Connected client ZIP:         1,846,921 bytes
+Windows installer size:       14,518,328 bytes
+Windows installer SHA-256:    B68C7CCE861923837A0DBC1A96F537C164FBA20EA8C14217F92349D17C46D846
+Connected client ZIP:         1,864,168 bytes
 Database integrity:           ok
 Active training tasks:        0
 Python training workers:      0
 ```
 
-The rebuilt installer was launched in a bounded smoke check and remained healthy for seven seconds before the exact test process was stopped. The native desktop controller also remained open in a bounded launch check; its exact test process was then stopped. The connected-client ZIP was downloaded through the live server and verified to contain the desktop application, local job runner, logo, client requirements and on-demand text runtime requirements.
+The rebuilt installer was launched in a bounded smoke check and remained healthy for six seconds before the exact test process was stopped. The connected-client ZIP is generated from the current source and includes the desktop application, typed model runner, local job runner, logo, client requirements and on-demand runtime requirements.
 
 ## Storage migration
 
@@ -77,7 +77,7 @@ Inference is now capability-driven across the web, API, CLI, and connected deskt
 
 ## Honest remaining operational boundaries
 
-- The public HTTPS installer was downloaded successfully and matched the local rebuilt executable byte-for-byte by SHA-256. A complete clean-machine installation remains a separate environment test.
+- The rebuilt installer and local download route match. During the final check, the public Cloudflare endpoint served an older cached installer while uncached origin requests returned HTTP 522. Restore the independent tunnel/origin path or purge/revalidate its cache before claiming the new installer is externally deployed. A complete clean-machine installation remains a separate environment test.
 - Public browser inference still runs on this host PC and needs queue/rate/VRAM controls before very large traffic.
 - Image runtime packages are on-demand architecture, not a newly verified end-to-end image training run.
 - No training workload was launched for verification.
