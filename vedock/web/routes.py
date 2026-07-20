@@ -48,7 +48,7 @@ from vedock.services.inference import RunnerValidationError, normalize_runtime_r
 from vedock.services.jobs import JobError, assert_training_enabled, delete_job, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation, resume_job
 from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, record_failed_merge_attempt, resolve_latest_pair
 from vedock.services.model_registry import fork_count, latest_version, recent_chat_models, runnable_models, visible_models
-from vedock.services.model_profiles import model_output_pattern, schema_with_model_defaults, submitted_with_model_defaults, validate_output_pattern
+from vedock.services.model_profiles import model_output_pattern, publisher_defaults, schema_with_model_defaults, set_publisher_defaults, submitted_with_model_defaults, validate_output_pattern
 from vedock.services.model_media import generated_cover_svg, save_model_cover
 from vedock.services.model_sources import (
     BUILD_MODES,
@@ -468,7 +468,8 @@ def model_details(slug: str):
     runtime = get_runtime(model.runtime_key)
     version = latest_version(model)
     capabilities = runtime.get_model_capabilities(version.storage_path if version else None)
-    return render_template("web/model_details.html", model=model, version=version, capabilities=capabilities, output_pattern=model_output_pattern(model, version, current_user.id), forks=fork_count(model))
+    inference_schema = schema_with_model_defaults(runtime.get_inference_parameter_schema(), model, version, current_user.id)
+    return render_template("web/model_details.html", model=model, version=version, capabilities=capabilities, output_pattern=model_output_pattern(model, version, current_user.id), publisher_defaults=publisher_defaults(version), publisher_fields=[field for field in inference_schema if field["name"] not in {"system_prompt", "output_pattern"}], forks=fork_count(model))
 
 
 @bp.post("/models/<slug>/fork")
@@ -536,6 +537,30 @@ def model_edit(slug: str):
                 configuration = dict(version.config_json or {})
                 configuration["output_pattern"] = pattern
                 version.config_json = configuration
+        version = latest_version(model)
+        if version:
+            inference_schema = get_runtime(model.runtime_key).get_inference_parameter_schema()
+            submitted_defaults: dict[str, object] = {}
+            for field in inference_schema:
+                field_name = field["name"]
+                form_name = f"publisher_{field_name}"
+                if field_name == "output_pattern":
+                    submitted_defaults[field_name] = pattern
+                elif field["type"] == "boolean":
+                    submitted_defaults[field_name] = form_name in request.form
+                elif form_name in request.form:
+                    submitted_defaults[field_name] = request.form.get(form_name)
+            normalized_defaults = validate_parameters(submitted_defaults, inference_schema, include_defaults=False)
+            chat_defaults = {
+                "use_history": "publisher_use_history" in request.form,
+                "context_limit": max(1, int(request.form.get("publisher_context_limit") or 16_000)),
+            }
+            set_publisher_defaults(
+                version,
+                normalized_defaults,
+                chat_defaults,
+                allow_user_overrides="publisher_allow_overrides" in request.form,
+            )
         db.session.commit()
         flash("Model metadata and runtime formatting were updated.", "success")
     except ValueError as exc:
@@ -682,7 +707,8 @@ def playground(slug: str | None):
     conversation = _owned_conversation(request.values.get("conversation_id") or request.args.get("conversation"))
     if conversation and ((conversation.model_id or conversation.model_version.model_id) != model.id or conversation.model_version_id != version.id):
         abort(404)
-    stored_chat = ((conversation.parameters_json or {}).get("_chat") or {}) if conversation else {}
+    published_chat = publisher_defaults(version)["chat"]
+    stored_chat = {**published_chat, **(((conversation.parameters_json or {}).get("_chat") or {}) if conversation else {})}
     model_conversations = (
         Conversation.query.filter_by(owner_id=current_user.id, model_id=model.id)
         .order_by(Conversation.updated_at.desc())
@@ -1074,7 +1100,12 @@ def cli_download():
 
 @bp.get("/downloads/vedock-installer.exe")
 def installer_download():
-    path = Path(current_app.config["DISTRIBUTION_ROOT"]) / "VedockInstaller.exe"
+    root = Path(current_app.config["DISTRIBUTION_ROOT"])
+    # A running Windows executable locks its own filename. Builds are first
+    # published to the unlocked current slot so web downloads can be updated
+    # without killing an installer window the user may still be viewing.
+    current = root / "VedockInstaller-current.exe"
+    path = current if current.is_file() else root / "VedockInstaller.exe"
     if not path.is_file():
         abort(404, description="The Windows installer has not been built on this node.")
     return send_file(path, as_attachment=True, download_name=f"{current_app.config['APP_SHORT_NAME']}-Installer.exe", mimetype="application/vnd.microsoft.portable-executable")

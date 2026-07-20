@@ -83,11 +83,12 @@ def test_image_folder_zip_inspects_and_saves_immutable_classification_version(re
         assert version.storage_path != db.session.get(RawDataset, dataset_id).storage_path
 
 
-def test_public_landing_is_a_model_directory(client):
+def test_public_landing_is_an_honest_product_page(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert b"MODEL DIRECTORY" in response.data
-    assert b"StoryMaker Final" in response.data
+    assert b"MODEL STUDIO" in response.data
+    assert b"The web coordinates" in response.data
+    assert b"StoryMaker Final" not in response.data
 
 
 def test_model_fork_edit_and_recoverable_remove_use_api(registered_client, app):

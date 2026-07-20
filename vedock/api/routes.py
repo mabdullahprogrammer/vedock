@@ -22,7 +22,7 @@ from vedock.services.inference import RunnerValidationError, normalize_runtime_r
 from vedock.services.jobs import JobError, delete_job, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation, resume_job
 from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, record_failed_merge_attempt, resolve_latest_pair
 from vedock.services.model_registry import fork_count, latest_version, visible_models
-from vedock.services.model_profiles import model_output_pattern, schema_with_model_defaults, submitted_with_model_defaults, validate_output_pattern
+from vedock.services.model_profiles import model_output_pattern, publisher_defaults, schema_with_model_defaults, set_publisher_defaults, submitted_with_model_defaults, validate_output_pattern
 from vedock.services.model_media import save_model_cover
 from vedock.services.paths import assert_writable_path
 from vedock.services.device_resources import (
@@ -334,6 +334,7 @@ def model_info(identifier: str):
     data["creator"] = model.owner.username if model.owner else "Vedock / legacy"
     data["fork_count"] = fork_count(model)
     data["output_pattern"] = model_output_pattern(model, version, g.api_user.id) if model.runtime_key in {"transformers_text", "storymaker"} else None
+    data["publisher_defaults"] = publisher_defaults(version)
     return ok(data)
 
 
@@ -387,6 +388,21 @@ def model_update(identifier: str):
                     configuration = dict(version.config_json or {})
                     configuration["output_pattern"] = pattern
                     version.config_json = configuration
+        if "publisher_defaults" in payload:
+            version = latest_version(model)
+            if not version:
+                return failure("A completed model version is required before publication defaults can be saved.", 409, "no_version")
+            supplied = payload.get("publisher_defaults") or {}
+            raw_parameters = dict(supplied.get("inference_parameters") or {})
+            if "output_pattern" in raw_parameters and model.runtime_key in {"transformers_text", "storymaker"}:
+                raw_parameters["output_pattern"] = validate_output_pattern(raw_parameters["output_pattern"])
+            normalized = validate_parameters(raw_parameters, get_runtime(model.runtime_key).get_inference_parameter_schema(), include_defaults=False)
+            set_publisher_defaults(
+                version,
+                normalized,
+                dict(supplied.get("chat") or {}),
+                allow_user_overrides=bool(supplied.get("allow_user_overrides", True)),
+            )
         db.session.commit()
         return ok(model.to_dict(include_versions=True))
     except ValueError as exc:

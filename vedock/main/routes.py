@@ -27,12 +27,10 @@ def brand_logo():
 
 @bp.get("/")
 def landing():
-    models = visible_models(None)[:8]
-    return render_template(
-        "landing.html",
-        featured_models=models,
-        fork_counts={model.id: fork_count(model) for model in models},
-    )
+    # The public root is Vedock's product page. Catalog bases, legacy imports,
+    # and user publications belong in the attributed model directory after
+    # sign-in; presenting them here implied that Vedock created their weights.
+    return render_template("landing.html")
 
 
 @bp.get("/health")

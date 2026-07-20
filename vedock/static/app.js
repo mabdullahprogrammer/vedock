@@ -374,4 +374,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); }
     });
   }
+
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll(".chat-row-menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+  });
 });

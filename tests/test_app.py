@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from vedock.models import Job, ModelProject, ModelRecord
+from vedock.extensions import db
+from vedock.models import Job, ModelProject, ModelRecord, ModelVersion, User
 from vedock.runtimes import get_runtime
 
 
@@ -26,6 +27,8 @@ def test_installer_folder_result_and_html_use_a_real_input_name():
     page = installer_html()
     assert 'id="installLocation"' in page
     assert "locationInput().value" in page
+    assert "const installButton=()=>byId('install')" in page
+    assert "install.disabled" not in page
 
 
 def test_installer_reuses_a_saved_custom_install(monkeypatch, tmp_path):
@@ -43,6 +46,46 @@ def test_installer_reuses_a_saved_custom_install(monkeypatch, tmp_path):
     state = InstallerBridge().state()
     assert state["installed"] is True
     assert state["location"] == str(location.resolve())
+
+
+def test_owner_can_publish_runtime_defaults(registered_client, app, tmp_path):
+    model_path = tmp_path / "published-model"
+    model_path.mkdir()
+    (model_path / "config.json").write_text('{"model_type":"gpt2"}', encoding="utf-8")
+    with app.app_context():
+        owner = User.query.filter_by(username="tester").one()
+        model = ModelRecord(owner=owner, slug="publisher-defaults", name="Publisher defaults", task_type="causal_lm", runtime_key="transformers_text", source_type="training", source_path=str(model_path), visibility="public")
+        model.versions.append(ModelVersion(version_number=1, label="Published", storage_path=str(model_path), status="completed"))
+        db.session.add(model)
+        db.session.commit()
+
+    saved = registered_client.post(
+        "/models/publisher-defaults/edit",
+        data={
+            "name": "Publisher defaults",
+            "description": "Owner-selected starting controls.",
+            "visibility": "public",
+            "output_pattern": "[input]{prompt}[/input][output]{response}[/output]",
+            "publisher_system_prompt": "Answer with short, direct language.",
+            "publisher_temperature": "0.65",
+            "publisher_max_new_tokens": "144",
+            "publisher_use_history": "true",
+            "publisher_context_limit": "12000",
+            "publisher_allow_overrides": "true",
+        },
+    )
+    assert saved.status_code == 302
+    with app.app_context():
+        version = ModelRecord.query.filter_by(slug="publisher-defaults").one().versions[-1]
+        defaults = version.metadata_json["publisher_defaults"]
+        assert defaults["inference_parameters"]["system_prompt"] == "Answer with short, direct language."
+        assert defaults["inference_parameters"]["temperature"] == 0.65
+        assert defaults["inference_parameters"]["output_pattern"].startswith("[input]")
+        assert defaults["chat"] == {"use_history": True, "context_limit": 12000}
+
+    details = registered_client.get("/api/v1/models/publisher-defaults")
+    assert details.status_code == 200
+    assert details.get_json()["data"]["publisher_defaults"]["inference_parameters"]["max_new_tokens"] == 144
 
 
 def test_branding_is_environment_driven(client):

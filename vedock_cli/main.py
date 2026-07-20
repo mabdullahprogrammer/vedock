@@ -626,9 +626,13 @@ def _local_cuda_available() -> bool:
 @click.option("--device", type=click.Choice(["auto", "cpu", "cuda"]), default="auto", show_default=True)
 @click.option("--precision", type=click.Choice(["float32", "float16", "bfloat16"]), default=None)
 @click.option("--publish/--keep-local", default=None, help="Publish automatically or keep the finalized model local; otherwise ask.")
+@click.option("--system-prompt", default="", help="Publisher's starting system prompt for other users.")
+@click.option("--output-pattern", default="", help="Publisher's starting {prompt}/{response} serialization pattern.")
+@click.option("--default-parameter", "default_parameters", multiple=True, metavar="NAME=VALUE", help="A published inference default; repeat for multiple values.")
+@click.option("--allow-user-overrides/--lock-user-overrides", default=True, help="Let users customize the published starting values.")
 @click.option("--yes", is_flag=True, help="Confirm local execution without another prompt (used by the desktop app).")
 @click.pass_obj
-def jobs_run(client: Client, job_id: str, device: str, precision: str | None, publish: bool | None, yes: bool) -> None:
+def jobs_run(client: Client, job_id: str, device: str, precision: str | None, publish: bool | None, system_prompt: str, output_pattern: str, default_parameters: tuple[str, ...], allow_user_overrides: bool, yes: bool) -> None:
     """Claim one hosted task and execute it on this computer."""
     from vedock_cli.local_jobs import ensure_runtime, run_claimed_job
 
@@ -664,7 +668,20 @@ def jobs_run(client: Client, job_id: str, device: str, precision: str | None, pu
     claimed = client.request("POST", f"/jobs/{job_id}/claim", json={"device_id": device_id, "device_name": device_name})
     manifest = claimed["manifest"]
     try:
-        result = run_claimed_job(client, job_id, manifest, device_id, publish)
+        inference_defaults: dict[str, Any] = {}
+        for item in default_parameters:
+            if "=" not in item:
+                raise click.ClickException(f"Use NAME=VALUE for --default-parameter, not {item!r}.")
+            key, raw = item.split("=", 1)
+            try:
+                inference_defaults[key.strip()] = json.loads(raw)
+            except json.JSONDecodeError:
+                inference_defaults[key.strip()] = raw
+        if system_prompt:
+            inference_defaults["system_prompt"] = system_prompt
+        if output_pattern:
+            inference_defaults["output_pattern"] = output_pattern
+        result = run_claimed_job(client, job_id, manifest, device_id, publish, {"inference_parameters": inference_defaults, "chat": {"use_history": True, "context_limit": 16000}, "allow_user_overrides": allow_user_overrides})
     except Exception:
         try:
             client.request("POST", f"/jobs/{job_id}/release", json={"device_id": device_id, "reason": "Local worker did not start successfully"})

@@ -26,6 +26,38 @@ def validate_output_pattern(value: str) -> str:
     return pattern
 
 
+def publisher_defaults(version: ModelVersion | None) -> dict[str, Any]:
+    """Return safe publication-time defaults attached to one model version."""
+    if not version:
+        return {"inference_parameters": {}, "chat": {}, "allow_user_overrides": True}
+    stored = dict((version.metadata_json or {}).get("publisher_defaults") or {})
+    inference = stored.get("inference_parameters")
+    chat = stored.get("chat")
+    return {
+        "inference_parameters": dict(inference) if isinstance(inference, dict) else {},
+        "chat": dict(chat) if isinstance(chat, dict) else {},
+        "allow_user_overrides": bool(stored.get("allow_user_overrides", True)),
+    }
+
+
+def set_publisher_defaults(
+    version: ModelVersion,
+    inference_parameters: dict[str, Any],
+    chat: dict[str, Any] | None = None,
+    *,
+    allow_user_overrides: bool = True,
+) -> dict[str, Any]:
+    defaults = {
+        "inference_parameters": dict(inference_parameters or {}),
+        "chat": dict(chat or {}),
+        "allow_user_overrides": bool(allow_user_overrides),
+    }
+    metadata = dict(version.metadata_json or {})
+    metadata["publisher_defaults"] = defaults
+    version.metadata_json = metadata
+    return defaults
+
+
 def model_output_pattern(model: ModelRecord, version: ModelVersion | None, owner_id: int | None = None) -> str:
     if owner_id is not None:
         state = ModelWorkspaceState.query.filter_by(owner_id=owner_id, model_id=model.id).first()
@@ -38,6 +70,9 @@ def model_output_pattern(model: ModelRecord, version: ModelVersion | None, owner
         if configured:
             return configured
     if version:
+        configured = str(publisher_defaults(version)["inference_parameters"].get("output_pattern") or "")
+        if configured:
+            return configured
         for container in [version.config_json or {}, version.metadata_json or {}]:
             configured = str(container.get("output_pattern") or ((container.get("parameters") or {}).get("output_pattern")) or "")
             if configured:
@@ -50,7 +85,10 @@ def schema_with_model_defaults(
 ) -> list[dict[str, Any]]:
     copied = deepcopy(schema)
     pattern = model_output_pattern(model, version, owner_id)
+    published = publisher_defaults(version)["inference_parameters"]
     for field in copied:
+        if field["name"] in published:
+            field["default"] = deepcopy(published[field["name"]])
         if field["name"] == "output_pattern":
             field["default"] = pattern
     return copied

@@ -174,6 +174,40 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
             user.set_password(new_id())
             db.session.add(user)
             db.session.flush()
+        existing_model = ModelRecord.query.filter_by(owner_id=user.id, slug=f"remote-base-{remote_job_id[:8]}").first()
+        existing_job = next(
+            (
+                item
+                for item in Job.query.filter_by(owner_id=user.id).all()
+                if str((item.config_json or {}).get("remote_job_id") or "") == remote_job_id
+            ),
+            None,
+        )
+        if existing_model and existing_job:
+            existing_version = ModelVersion.query.filter_by(model_id=existing_model.id).order_by(ModelVersion.version_number.desc()).first()
+            existing_dataset = db.session.get(DatasetVersion, (existing_job.config_json or {}).get("dataset_version_id"))
+            if existing_version and existing_dataset and Path(existing_dataset.storage_path).is_file():
+                existing_model.name = model_info["name"]
+                existing_model.source_path = model_reference
+                existing_version.storage_path = model_reference
+                existing_version.config_json = model_info.get("version_config") or {}
+                existing_job.status = "queued"
+                existing_job.progress = 0
+                existing_job.current_stage = "queued"
+                existing_job.error_message = None
+                existing_job.cancel_requested = False
+                existing_job.result_model_version_id = None
+                existing_job.config_json = {
+                    **(existing_job.config_json or {}),
+                    "model_id": existing_model.id,
+                    "base_model_version_id": existing_version.id,
+                    "dataset_version_id": existing_dataset.id,
+                    "runtime": manifest["runtime"],
+                    "task_type": manifest["task_type"],
+                    "parameters": manifest["parameters"],
+                }
+                db.session.commit()
+                return database, storage, existing_job.id, Path(existing_job.logs_path or workspace / "local-job.jsonl")
         model = ModelRecord(
             owner=user,
             slug=f"remote-base-{remote_job_id[:8]}",
@@ -268,7 +302,7 @@ def _publish_files(output: Path, archive: Path) -> tuple[int, int, list[str]]:
     return len(files), sum((output / Path(name)).stat().st_size for name in files), files
 
 
-def run_claimed_job(client: Any, remote_job_id: str, manifest: dict[str, Any], device_id: str, publish: bool | None) -> dict[str, Any]:
+def run_claimed_job(client: Any, remote_job_id: str, manifest: dict[str, Any], device_id: str, publish: bool | None, publisher_defaults: dict[str, Any] | None = None) -> dict[str, Any]:
     database, storage, local_job_id, log_path = prepare_local_job(client, remote_job_id, manifest, device_id)
     client.request("POST", f"/jobs/{remote_job_id}/events", json={"device_id": device_id, "status": "running", "stage": "starting_local_worker", "progress": 1, "message": "Local training worker started"})
     command = [sys.executable, "-m", "vedock_cli.local_worker", local_job_id, "--database", database.as_posix(), "--storage", storage.as_posix()]
@@ -349,7 +383,7 @@ def run_claimed_job(client: Any, remote_job_id: str, manifest: dict[str, Any], d
             "POST",
             f"/jobs/{remote_job_id}/finalize",
             files={"artifact": (archive.name, stream, "application/zip")},
-            data={"device_id": device_id, "metadata": json.dumps({"name": model_row[0] if model_row else "Finalized model", "description": model_row[1] if model_row else "", "publish": True})},
+            data={"device_id": device_id, "metadata": json.dumps({"name": model_row[0] if model_row else "Finalized model", "description": model_row[1] if model_row else "", "publish": True, "publisher_defaults": publisher_defaults or {}})},
             timeout=7200,
         )
     click.secho("✓ Finalized model published", fg="green", bold=True)

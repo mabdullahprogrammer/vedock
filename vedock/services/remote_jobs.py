@@ -291,6 +291,23 @@ def finalize_remote_job(job: Job, device_id: str, upload: FileStorage, metadata:
         configuration = job.config_json or {}
         base = db.session.get(ModelRecord, configuration.get("model_id"))
         params = configuration.get("parameters") or {}
+        published = dict(metadata.get("publisher_defaults") or {})
+        if published:
+            inference_schema = get_runtime(str(configuration.get("runtime") or "transformers_text")).get_inference_parameter_schema()
+            published_parameters = validate_parameters(dict(published.get("inference_parameters") or {}), inference_schema, include_defaults=False)
+            chat = dict(published.get("chat") or {})
+            if "context_limit" in chat:
+                chat["context_limit"] = max(1, int(chat["context_limit"]))
+            if "use_history" in chat:
+                chat["use_history"] = bool(chat["use_history"])
+            metadata = {
+                **metadata,
+                "publisher_defaults": {
+                    "inference_parameters": published_parameters,
+                    "chat": chat,
+                    "allow_user_overrides": bool(published.get("allow_user_overrides", True)),
+                },
+            }
         name = str(metadata.get("name") or params.get("output_model_name") or "Finalized model")[:160]
         model = ModelRecord(
             id=model_id,

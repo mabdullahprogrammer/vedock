@@ -1,37 +1,35 @@
 {% extends "base.html" %}
 {% block title %}{{ branding.tagline }}{% endblock %}
 {% block content %}
-<main class="community-landing">
-  <section class="community-hero">
+<main class="community-landing product-landing">
+  <section class="community-hero product-hero">
     <div class="community-hero-copy">
       <span class="landing-kicker"><i></i> THE AI DEVELOPMENT WORKSPACE</span>
-      <h1>Build the model.<br><em>Keep the control.</em></h1>
-      <p>Discover useful models, run them in the right interface, remix what works, and train with your own hardware and private data.</p>
-      <div class="hero-actions clean-actions"><a class="button large" href="{{ url_for('auth.register') }}">Create your workspace</a><a class="button ghost large" href="{{ url_for('auth.login') }}">Sign in and explore</a></div>
-      <div class="hero-proof clean-proof"><span>Real runtime capabilities</span><span>Device-local training</span><span>Private by default</span></div>
+      <h1>Build any AI.<br><em>Keep every control.</em></h1>
+      <p>Prepare data, configure real runtimes, train on your own hardware, test through the correct interface, and publish only the result you choose.</p>
+      <div class="hero-actions clean-actions"><a class="button large" href="{{ url_for('auth.register') }}">Create your workspace</a><a class="button ghost large" href="{{ url_for('auth.login') }}">Sign in</a></div>
+      <div class="hero-proof clean-proof"><span>No-code workflow</span><span>Device-local training</span><span>Full parameter control</span></div>
     </div>
-    {% if featured_models %}{% set featured = featured_models[0] %}
-    <article class="featured-model-stage">
-      <a class="featured-cover" href="{{ url_for('auth.login', next=url_for('web.model_details', slug=featured.slug)) }}"><img src="{{ url_for('web.model_cover', slug=featured.slug) }}" alt="{{ featured.name }}"><span>FEATURED MODEL</span></a>
-      <div class="featured-model-copy"><span class="model-objective">{{ featured.task_type | replace('_',' ') }}</span><h2>{{ featured.name }}</h2><p>{{ featured.description or 'Open the model to inspect its capabilities, versions, and supported controls.' }}</p><div class="featured-facts"><span><small>CREATOR</small><b>@{{ featured.owner.username if featured.owner else 'vedock' }}</b></span><span><small>RUNTIME</small><b>{{ featured.runtime_key | replace('_',' ') }}</b></span><span><small>REMIXES</small><b>{{ fork_counts.get(featured.id, 0) }}</b></span></div><a class="featured-open" href="{{ url_for('auth.login', next=url_for('web.model_details', slug=featured.slug)) }}">Open model <b>→</b></a></div>
+    <article class="product-console" aria-label="Vedock product workflow preview">
+      <header><div class="product-console-brand"><img src="{{ url_for('main.brand_logo') }}" alt=""><span><b>{{ branding.name }}</b><small>MODEL STUDIO</small></span></div><span class="product-console-live"><i></i> DEVICE READY</span></header>
+      <div class="product-console-body">
+        <nav><span class="active">01&nbsp;&nbsp;Objective</span><span>02&nbsp;&nbsp;Source</span><span>03&nbsp;&nbsp;Dataset</span><span>04&nbsp;&nbsp;Method</span><span>05&nbsp;&nbsp;Parameters</span><span>06&nbsp;&nbsp;Review</span></nav>
+        <section><span class="section-index">BUILD DEFINITION</span><h2>One guided path.<br>Real development choices.</h2><div class="console-choice selected"><i>01</i><span><b>Fine-tune a base</b><small>Catalog, repository, checkpoint, or device folder</small></span><strong>SELECTED</strong></div><div class="console-choice"><i>02</i><span><b>Define from scratch</b><small>Choose a supported architecture and configuration</small></span></div><div class="console-choice"><i>03</i><span><b>Merge or remix</b><small>Validate sources, weights, tokenizer, and output</small></span></div><footer><span>Configuration saved. Nothing starts automatically.</span><b>Continue&nbsp; →</b></footer></section>
+      </div>
     </article>
-    {% else %}
-    <article class="featured-model-stage empty-stage"><img src="{{ url_for('main.brand_logo') }}" alt="{{ branding.name }}"><div><span class="model-objective">MODEL DIRECTORY</span><h2>Your model can be first.</h2><p>Create from a catalog base, a connected-device folder, a checkpoint, or a new architecture.</p></div></article>
-    {% endif %}
   </section>
 
-  {% if featured_models %}
-  <section class="real-model-directory" aria-label="Models ready to use">
-    <header><div><span class="section-index">LIVE MODEL DIRECTORY</span><h2>Choose by capability, not by a fake personality label.</h2></div><a href="{{ url_for('auth.login') }}">View the full community →</a></header>
-    <div class="real-model-rail">{% for model in featured_models[:8] %}<a class="real-model-card" href="{{ url_for('auth.login', next=url_for('web.model_details', slug=model.slug)) }}"><div class="real-model-art"><img src="{{ url_for('web.model_cover', slug=model.slug) }}" alt=""><span>{{ model.task_type | replace('_',' ') }}</span></div><div class="real-model-info"><h3>{{ model.name }}</h3><p>{{ model.description or 'Inspect and run this model with its declared runtime interface.' }}</p><footer><span>@{{ model.owner.username if model.owner else 'vedock' }}</span><b>{{ fork_counts.get(model.id, 0) }} remix{{ '' if fork_counts.get(model.id, 0) == 1 else 'es' }}</b></footer></div></a>{% endfor %}</div>
-  </section>
-  {% endif %}
-
-  <section class="device-first-story">
-    <header><span class="section-index">ONE WORKSPACE, CORRECT COMPUTE</span><h2>The web coordinates. Your device builds.</h2><p>A simple boundary that keeps private development files and expensive training away from the hosted server.</p></header>
-    <div class="device-story-grid"><article><b>01</b><span><strong>Design on the web</strong><small>Choose the objective, source, dataset contract, method, and every supported parameter.</small></span></article><article><b>02</b><span><strong>Resolve private files locally</strong><small>The installed app uses native pickers. A path such as D:\models\one is read on that user's device.</small></span></article><article><b>03</b><span><strong>Run only when you say so</strong><small>A saved task is inert until its owner presses Run in the app or CLI.</small></span></article><article><b>04</b><span><strong>Publish the useful result</strong><small>Only finalized inference/edit artifacts are uploaded when the owner chooses to publish.</small></span></article></div>
+  <section class="product-pillars">
+    <header><span class="section-index">FROM RAW INPUT TO RUNNABLE MODEL</span><h2>Everything a model builder needs.<br>Nothing hidden behind code.</h2></header>
+    <div><article><span>DATA</span><h3>Dataset Workshop</h3><p>Inspect quality, fix structure, map fields, preview transformations, validate the target contract, and keep every version immutable.</p><small>CSV · JSONL · text · images · tables</small></article><article><span>BUILD</span><h3>Model Studio</h3><p>Start from a catalog architecture, a checkpoint, a connected-device directory, a fork, a merge, or a supported scratch definition.</p><small>Simple presets + advanced parameters</small></article><article><span>RUN</span><h3>Capability UI</h3><p>Chat with language models, generate images, classify inputs, or run tabular prediction through an interface declared by its runtime.</p><small>The model decides the runner</small></article></div>
   </section>
 
+  <section class="device-first-story product-device-story">
+    <header><span class="section-index">HOSTED CONTROL, PERSONAL COMPUTE</span><h2>The web coordinates.<br>Your device builds.</h2><p>Private paths, raw datasets, and active training stay on the connected owner device. The server receives only what the owner explicitly publishes.</p></header>
+    <div class="device-story-grid"><article><b>01</b><span><strong>Design on the web</strong><small>Choose the objective, source, dataset contract, method, and supported parameters.</small></span></article><article><b>02</b><span><strong>Resolve files on your device</strong><small>Native pickers and entered paths are resolved by the connected app—not the hosted server.</small></span></article><article><b>03</b><span><strong>Run only when you decide</strong><small>A task remains inactive until its owner starts it from Vedock Desktop or the CLI.</small></span></article><article><b>04</b><span><strong>Publish with useful defaults</strong><small>Choose the final artifacts, visibility, system prompt, input pattern, and starting inference controls.</small></span></article></div>
+  </section>
+
+  <section class="product-control-strip"><div><span class="section-index">NO CODE DOES NOT MEAN NO CONTROL</span><h2>Start simple. Open every supported setting when you need it.</h2></div><div class="control-code"><span>learning_rate</span><b>0.0002</b><i></i><span>training_method</span><b>LoRA</b><i></i><span>context + output pattern</span><b>Editable</b></div></section>
   <section class="landing-final-cta"><img src="{{ url_for('main.brand_logo') }}" alt=""><div><span class="section-index">{{ branding.name | upper }}</span><h2>{{ branding.tagline }}</h2></div><a class="button large" href="{{ url_for('auth.register') }}">Start building →</a></section>
 </main>
 {% endblock %}
