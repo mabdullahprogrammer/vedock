@@ -61,7 +61,7 @@ Resolved. `start-vedock.cmd` is available for double-click startup, and `scripts
 - The runtime caches its loaded model by reference, device, and precision instead of reloading it for every message.
 - GPT-2 catalog entries, arbitrary Hugging Face causal-LM repositories, local model directories, checkpoints, and scratch GPT-2 architectures are available as source types.
 - Float inputs use browser `step="any"`; the server remains the authoritative bounds validator, so values such as `0.0002` are accepted.
-- Dataset pages show the raw local path, each immutable processed-version path, hashes, validation status, and download links.
+- Dataset pages never expose a connected device's absolute path. They show safe filenames, opaque device references, hashes, validation status, and locally available export actions.
 - Expected merge failures return compatibility details or visible experimental errors without producing HTTP 500 pages.
 - `MODEL_TRAINING_ENABLED=false` now blocks model-training submission from both web and API/CLI until the requested final phase.
 - The read-only AI source trees were assessed in `READ_ONLY_AI_CODE_ASSESSMENT.md`; unsafe train-on-import experiments were not copied into the production runtime.

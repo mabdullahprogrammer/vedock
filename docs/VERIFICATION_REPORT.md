@@ -11,10 +11,10 @@ No model training was started during this implementation and verification pass.
 ## Automated checks
 
 ```text
-41 passed
+47 passed
 ```
 
-The suite covers branding, authentication, protected pages, hosted hardware/path privacy, no-load legacy registration, API tokens, chat routing, streaming context and stop dispatch, chat deletion, dataset inspection recommendations, transformation/immutability, JSON/JSONL/CSV/XLSX/TXT export, schema-driven parameters, recoverable device task release, ignored inactive LoRA fields, model ownership/remix, covers, archive generation, protected paths, safe model merging, typed runtime contracts, tabular dataset mapping, numeric-prediction API/UI rendering, sequence-completion routing, and portable image-classifier inference.
+The suite covers branding, authentication, protected pages, hosted hardware/path privacy, no-load legacy registration, API tokens, chat routing, streaming context and stop dispatch, chat deletion, dataset inspection recommendations, transformation/immutability, JSON/JSONL/CSV/XLSX/TXT export, schema-driven parameters, recoverable device task release, ignored inactive LoRA fields, model ownership/remix, covers, archive generation, protected paths, merge failure reporting, typed runtime contracts, tabular dataset mapping, numeric-prediction API/UI rendering, sequence-completion routing, portable image-classifier inference, connected-device path relaying, opaque resource records, device-bound task claims, local immutable dataset preparation, and image ZIP preparation.
 
 All Python sources in `vedock`, `vedock_cli`, `installer` and `tests` also passed `compileall`.
 
@@ -25,9 +25,9 @@ Landing page:                  HTTP 200
 API node mode:                hosted_inference
 API storage location:         private_host_storage
 Windows installer route:      HTTP 200
-Windows installer size:       14,518,328 bytes
-Windows installer SHA-256:    B68C7CCE861923837A0DBC1A96F537C164FBA20EA8C14217F92349D17C46D846
-Connected client ZIP:         1,864,168 bytes
+Windows installer size:       14,518,191 bytes
+Windows installer SHA-256:    5B06A45FAE9DA3F95E7643E5B2B60137CACA632BBDFEF5C921E509032BE8561A
+Connected client ZIP:         1,881,861 bytes
 Database integrity:           ok
 Active training tasks:        0
 Python training workers:      0
@@ -60,8 +60,11 @@ Source and destination file counts and byte totals matched for both copies. Both
 - Python 3.11 detection and quiet winget install on Windows when absent.
 - Small base install; heavy ML runtimes download only for a task that needs them.
 - Real desktop pages for training tasks, models, datasets, this device and installed runtimes.
+- Native model-folder and dataset-file pickers backed by a device-only path registry.
+- Web-entered paths are relayed only to the selected authenticated device, verified there, replaced by opaque `device://` references, and erased from the relay record.
+- Local dataset preparation supports schema selection, field mapping, immutable JSONL output, deduplication, incomplete-row removal, and class-folder image ZIPs.
 - Runtime readiness is checked before claim; failed setup cannot strand a task in `claimed_by_local_device`.
-- Claimed-but-not-running tasks can be resumed or released by the claiming device.
+- Claimed-but-not-running tasks can be released; failed/cancelled tasks can be resumed without auto-starting and terminal task records can be deleted while preserving finalized models.
 - Existing installs and runtimes are detected and are not downloaded twice.
 - Vedock ICO branding is applied to the installer, Start Menu shortcut, desktop shortcut and desktop window.
 - Desktop task list, device/precision controls, local logs and publish-or-keep-local choice.
@@ -77,7 +80,7 @@ Inference is now capability-driven across the web, API, CLI, and connected deskt
 
 ## Honest remaining operational boundaries
 
-- The rebuilt installer and local download route match. During the final check, the public Cloudflare endpoint served an older cached installer while uncached origin requests returned HTTP 522. Restore the independent tunnel/origin path or purge/revalidate its cache before claiming the new installer is externally deployed. A complete clean-machine installation remains a separate environment test.
+- The rebuilt installer, local download route, and cache-busted public endpoint now match at 14,518,191 bytes and SHA-256 `5B06A45FAE9DA3F95E7643E5B2B60137CACA632BBDFEF5C921E509032BE8561A`. A complete clean-machine installation remains a separate environment test.
 - Public browser inference still runs on this host PC and needs queue/rate/VRAM controls before very large traffic.
 - Image runtime packages are on-demand architecture, not a newly verified end-to-end image training run.
 - No training workload was launched for verification.

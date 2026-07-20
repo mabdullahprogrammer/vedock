@@ -61,7 +61,7 @@
     </section>
     <section data-drawer-history hidden>
       <button class="back-link" type="button" data-hide-history>← Model</button><h2>Chat history</h2>
-      <div class="drawer-history-list">{% for item in model_conversations %}<a class="{{ 'active' if conversation and item.id == conversation.id else '' }}" href="{{ url_for('web.playground', slug=model.slug, conversation=item.id) }}"><strong>{{ item.title }}</strong><small>{{ item.messages | length }} messages · {{ item.updated_at.strftime('%b %d, %H:%M') if item.updated_at else '' }}</small></a>{% else %}<p>No earlier chats with this model.</p>{% endfor %}</div>
+      <div class="drawer-history-list">{% for item in model_conversations %}<article class="history-row"><a class="{{ 'active' if conversation and item.id == conversation.id else '' }}" href="{{ url_for('web.playground', slug=model.slug, conversation=item.id) }}"><strong>{{ item.title }}</strong><small>{{ item.messages | length }} messages · {{ item.updated_at.strftime('%b %d, %H:%M') if item.updated_at else '' }}</small></a><form method="post" action="{{ url_for('web.conversation_delete', conversation_id=item.id) }}" onsubmit="return confirm('Delete this chat?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" aria-label="Delete {{ item.title }}">×</button></form></article>{% else %}<p>No earlier chats with this model.</p>{% endfor %}</div>
     </section>
   </aside>
 

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 from flask import current_app
 
 from vedock.extensions import db
 from vedock.models import ModelRecord, ModelVersion, User, new_id
-from vedock.runtimes import get_runtime
-
+from .device_resources import request_device_path
 from .model_references import make_huggingface_reference, make_scratch_reference
 from .training import re_safe_slug
 
@@ -176,20 +174,23 @@ def resolve_model_source(owner: User, task_type: str, source_type: str, values: 
     if source_type in {"local", "checkpoint"}:
         raw_path = str(values.get("local_path") or "").strip().strip('"')
         if not raw_path:
-            raise ModelSourceError("Enter a local model directory.")
-        path = Path(raw_path).expanduser().resolve()
-        if not path.is_dir():
-            raise ModelSourceError(f"Local model directory does not exist: {path}")
-        validation = get_runtime(runtime_key).validate_model(str(path))
-        if not validation["valid"]:
-            raise ModelSourceError("; ".join(validation["errors"]))
-        reference = str(path)
-        existing = _existing_reference(reference, owner)
-        if existing:
-            return existing
-        name = str(values.get("model_name") or path.name).strip()
-        kind = "checkpoint_read_only" if source_type == "checkpoint" else "local_read_only"
-        return _new_model(owner, name, task_type, runtime_key, kind, reference, "completed", {"validation": validation})
+            raise ModelSourceError("Enter a model directory from your connected device.")
+        try:
+            resource = request_device_path(
+                owner,
+                str(values.get("device_id") or ""),
+                "checkpoint" if source_type == "checkpoint" else "model",
+                raw_path,
+                display_name=str(values.get("model_name") or "").strip() or None,
+                runtime_key=runtime_key,
+                task_type=task_type,
+            )
+        except ValueError as exc:
+            raise ModelSourceError(str(exc)) from exc
+        version = ModelVersion.query.filter_by(storage_path=resource.reference).first()
+        if not version:
+            raise ModelSourceError("The connected-device model request could not be registered.")
+        return version.model
 
     if source_type == "scratch":
         architecture_family = str(values.get("architecture_family") or "gpt2").strip().lower()

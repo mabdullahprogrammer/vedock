@@ -4,15 +4,16 @@
 
 `https://vedock.ecorims.com` is the hosted Vedock control plane and public inference service. Browser-only users do not use WebGPU. Public chat inference runs on the Vedock host PC against finalized models stored under `E:\Vedock\storage`.
 
-Training is different. The hosted server may accept a dataset, preserve immutable dataset versions, build a project, validate parameters and create a training task, but it does not start a training worker. A hosted task begins in `awaiting_device`.
+Training is different. The hosted server coordinates dataset/model metadata, projects, parameters, and task state, but private source artifacts remain on the owner's connected device. A hosted task begins in `awaiting_device`.
 
 ```text
 Hosted web
-  -> save dataset, model project and training configuration
+  -> select or prepare a device-local dataset and model source
+  -> save safe metadata, model project and training configuration
   -> create inert task: awaiting_device
   -> authenticated owner sees the same task in CLI/desktop
   -> owner explicitly starts it on a Windows/Linux computer
-  -> local client downloads required inputs and runtimes
+  -> local client resolves private `device://` inputs or downloads public bases
   -> local worker trains on that computer
   -> progress and logs stream to the hosted account
   -> owner reviews the finalized artifact
@@ -20,6 +21,8 @@ Hosted web
 ```
 
 The hosted server never launches an `awaiting_device` task. Merely opening the site, saving a project, restarting Vedock, or creating a task cannot start training.
+
+When a user enters `D:\models\one` on the web, the hosted process never resolves that string against its own filesystem. It relays the locator only to the selected authenticated device. That client validates the local folder, stores the real path in its private configuration, returns a capability/hash manifest, and the control plane replaces the locator with an opaque `device://RESOURCE_ID` reference.
 
 ## Connected client
 
@@ -42,13 +45,14 @@ awaiting_device -> claimed -> running -> awaiting_publish -> completed
               +-------+ release before worker start
                                    \-> failed
                                    \-> cancelled
+failed/cancelled -> awaiting_device (manual resume; never auto-start)
 ```
 
 Only the task owner can inspect, edit, claim, cancel or finalize a task. Parameters can be edited while it is waiting. The CLI previews the model, dataset, row count and method before claiming. A cancellation made on the web is observed by the local runner and stops the local worker without publishing a model.
 
 ## Artifact boundary
 
-The client uses authenticated, task-scoped endpoints to obtain the immutable processed dataset and, when required, a base-model archive. Hashes are checked and ZIP extraction rejects path traversal.
+For device-local artifacts, the client reads its own immutable processed dataset and model folder directly and verifies the registered resource ownership/hash. No private file is uploaded for task preparation. For hosted/public bases, authenticated task-scoped downloads remain available; hashes are checked and ZIP extraction rejects path traversal.
 
 Publication filters out checkpoints and unrelated local files. Accepted outputs are model weights/adapters, tokenizer assets, model/runtime configuration, model card and Vedock training metadata required for inference or continued editing. A finalized result may instead remain private on the device.
 

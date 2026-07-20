@@ -19,6 +19,30 @@ class MergeError(ValueError):
     pass
 
 
+def record_failed_merge_attempt(
+    version_a: ModelVersion,
+    version_b: ModelVersion,
+    method: str,
+    weights: list[float],
+    owner: User,
+    report: dict[str, Any],
+    error: str,
+) -> MergeRecord:
+    """Persist an experimental attempt without producing a corrupt artifact."""
+    record = MergeRecord(
+        owner=owner,
+        source_versions_json=[version_a.id, version_b.id],
+        method=str(method or "auto")[:40],
+        weights_json=weights,
+        configuration_json={"attempted": True, "error": str(error)[:5000]},
+        compatibility_json=report,
+        status="failed",
+    )
+    db.session.add(record)
+    db.session.commit()
+    return record
+
+
 def _json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))

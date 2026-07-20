@@ -128,8 +128,16 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
     workspace = compute_root() / "jobs" / remote_job_id
     storage = workspace / "storage"
     database = workspace / "vedock-local.db"
-    dataset_path = workspace / "inputs" / "dataset.jsonl"
-    _download(client, f"/jobs/{remote_job_id}/dataset", dataset_path, device_id)
+    dataset_info = manifest["dataset"]
+    if dataset_info.get("device_resource_id"):
+        from vedock_cli.resources import resolve_local_resource
+
+        if dataset_info.get("required_device_id") != device_id:
+            raise click.ClickException("This private dataset belongs to another connected device.")
+        dataset_path = resolve_local_resource(client, str(dataset_info["device_resource_id"]), "dataset")
+    else:
+        dataset_path = workspace / "inputs" / "dataset.jsonl"
+        _download(client, f"/jobs/{remote_job_id}/dataset", dataset_path, device_id)
     expected_hash = str(manifest["dataset"].get("sha256") or "")
     if expected_hash:
         import hashlib
@@ -143,7 +151,13 @@ def prepare_local_job(client: Any, remote_job_id: str, manifest: dict[str, Any],
             raise click.ClickException("The downloaded dataset hash does not match the task manifest.")
 
     model_info = manifest["model"]
-    if model_info.get("artifact_required"):
+    if model_info.get("device_resource_id"):
+        from vedock_cli.resources import resolve_local_resource
+
+        if model_info.get("required_device_id") != device_id:
+            raise click.ClickException("This private base model belongs to another connected device.")
+        model_reference = str(resolve_local_resource(client, str(model_info["device_resource_id"]), "model"))
+    elif model_info.get("artifact_required"):
         archive = workspace / "inputs" / "base-model.zip"
         base_path = workspace / "inputs" / "base-model"
         _download(client, f"/jobs/{remote_job_id}/base-model", archive, device_id)

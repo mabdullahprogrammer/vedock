@@ -313,3 +313,49 @@ def request_cancellation(job: Job, owner: User) -> Job:
     db.session.commit()
     append_job_log(job, "Cancellation requested")
     return job
+
+
+def resume_job(job: Job, owner: User) -> Job:
+    """Return a terminal training task to a manual queue without executing it."""
+    if job.owner_id != owner.id:
+        raise JobError("You do not own this job.")
+    if job.status not in {"failed", "cancelled"}:
+        raise JobError("Only a failed or cancelled task can be resumed.")
+    configuration = job.config_json or {}
+    if job.job_type == "training":
+        base_version_id = configuration.get("base_model_version_id")
+        dataset_version_id = configuration.get("dataset_version_id")
+        if not base_version_id or not db.session.get(ModelVersion, base_version_id):
+            raise JobError("The base model version no longer exists.")
+        if not dataset_version_id or not db.session.get(DatasetVersion, dataset_version_id):
+            raise JobError("The dataset version no longer exists.")
+    job.status = "queued" if current_app.config.get("NODE_MODE") == "local_compute" else "awaiting_device"
+    job.current_stage = "queued" if job.status == "queued" else "waiting_for_device"
+    job.progress = 0
+    job.error_message = None
+    job.cancel_requested = False
+    job.worker_pid = None
+    job.claimed_by_device = None
+    job.device_name = None
+    job.last_heartbeat_at = None
+    job.started_at = None
+    job.finished_at = None
+    db.session.commit()
+    append_job_log(job, "Task resumed and returned to the manual queue; no compute was started")
+    return job
+
+
+def delete_job(job: Job, owner: User) -> str:
+    if job.owner_id != owner.id:
+        raise JobError("You do not own this job.")
+    if job.status not in {"failed", "cancelled", "completed"}:
+        raise JobError("Cancel an active task before deleting it.")
+    job_id = job.id
+    log_path = Path(job.logs_path)
+    db.session.delete(job)
+    db.session.commit()
+    try:
+        log_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return job_id

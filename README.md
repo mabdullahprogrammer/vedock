@@ -67,12 +67,16 @@ Copy `.env.example` to `.env` before deployment. Replace `SECRET_KEY`, choose `N
 vedock login
 vedock doctor
 vedock models list
+vedock models add-local D:\models\my-model
 vedock chat MODEL
 vedock models run SALES_MODEL --input ad_spend=1200 --input region=north
 vedock models run IMAGE_MODEL --file image=sample.png --parameter top_k=5
 vedock datasets list
+vedock datasets add-local D:\data\training.csv --schema prompt_response
 vedock jobs list
 vedock jobs run JOB_ID
+vedock jobs resume JOB_ID
+vedock jobs delete JOB_ID
 ```
 
 `vedock chat` is specifically for chat-capable language models. `vedock models run` is universal and reads the selected model's typed contract.
@@ -83,7 +87,10 @@ vedock jobs run JOB_ID
 - Creating a hosted training task does not execute it on the server.
 - Only the owner's authenticated CLI or desktop client can claim that task.
 - Runtime readiness is checked before claim; installed components are reused.
-- Datasets and required base artifacts are transferred only for that task.
+- A path entered on the hosted web is resolved by the selected connected device, never by the hosted server.
+- Private local models and processed datasets are represented by opaque `device://` references; their actual paths live only in the installed client's configuration.
+- The matching client validates local resources, reports safe metadata and hashes, and reads them directly during training.
+- Hosted/public base artifacts may still be downloaded by the connected client when a task needs them.
 - The owner explicitly chooses whether the finalized inference artifact is uploaded and published.
 - Hosted APIs redact server hardware and filesystem paths.
 

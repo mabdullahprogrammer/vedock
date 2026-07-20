@@ -18,6 +18,7 @@ from .jobs import JobError, append_job_log
 from .model_references import parse_model_reference
 from .paths import allocate_directory, assert_writable_path
 from .training import re_safe_slug
+from .device_resources import required_job_resources, resource_for_reference
 
 
 FINAL_ARTIFACT_NAMES = {
@@ -59,9 +60,21 @@ def job_manifest(job: Job) -> dict[str, Any]:
     dataset = db.session.get(DatasetVersion, configuration.get("dataset_version_id"))
     if not model or not version or not dataset:
         raise JobError("This task references a model or dataset version that no longer exists.")
-    reference = parse_model_reference(version.storage_path)
-    artifact_required = reference.kind == "local"
-    artifact_size = _directory_size(Path(reference.source)) if artifact_required and Path(reference.source).is_dir() else 0
+    model_resource = resource_for_reference(version.storage_path)
+    if model_resource:
+        reference_kind = "device"
+        artifact_required = False
+        artifact_size = model_resource.size_bytes
+        reference_value = None
+    else:
+        reference = parse_model_reference(version.storage_path)
+        reference_kind = reference.kind
+        artifact_required = reference.kind == "local"
+        artifact_size = _directory_size(Path(reference.source)) if artifact_required and Path(reference.source).is_dir() else 0
+        reference_value = version.storage_path if reference.kind in {"huggingface", "scratch"} else None
+    dataset_reference = str(dataset.storage_path).split("/processed", 1)[0]
+    dataset_resource = resource_for_reference(dataset_reference)
+    dataset_size = dataset_resource.size_bytes if dataset_resource else (Path(dataset.storage_path).stat().st_size if Path(dataset.storage_path).is_file() else 0)
     return {
         "job": job.to_dict(),
         "runtime": configuration.get("runtime"),
@@ -74,8 +87,11 @@ def job_manifest(job: Job) -> dict[str, Any]:
             "runtime": model.runtime_key,
             "task_type": model.task_type,
             "source_type": model.source_type,
-            "reference_kind": reference.kind,
-            "reference": version.storage_path if reference.kind in {"huggingface", "scratch"} else None,
+            "reference_kind": reference_kind,
+            "reference": reference_value,
+            "device_resource_id": model_resource.id if model_resource else None,
+            "required_device_id": model_resource.device_uid if model_resource else None,
+            "resource_status": model_resource.status if model_resource else None,
             "version_id": version.id,
             "version_status": version.status,
             "version_config": version.config_json or {},
@@ -88,7 +104,10 @@ def job_manifest(job: Job) -> dict[str, Any]:
             "schema": dataset.output_format,
             "rows": dataset.row_count,
             "sha256": dataset.sha256,
-            "size_bytes": Path(dataset.storage_path).stat().st_size,
+            "size_bytes": dataset_size,
+            "device_resource_id": dataset_resource.id if dataset_resource else None,
+            "required_device_id": dataset_resource.device_uid if dataset_resource else None,
+            "resource_status": dataset_resource.status if dataset_resource else None,
         },
     }
 
@@ -117,6 +136,17 @@ def claim_job(job: Job, device_id: str, device_name: str) -> Job:
         return job
     if job.status != "awaiting_device":
         raise JobError(f"A task with status {job.status!r} cannot be claimed.")
+    configuration = job.config_json or {}
+    version = db.session.get(ModelVersion, configuration.get("base_model_version_id"))
+    dataset = db.session.get(DatasetVersion, configuration.get("dataset_version_id"))
+    if not version or not dataset:
+        raise JobError("This task references a model or dataset version that no longer exists.")
+    resources = required_job_resources(version, dataset)
+    for resource in resources:
+        if resource.device_uid != device_id:
+            raise JobError(f"{resource.display_name} is private to another connected device. Run this task on that device.")
+        if resource.status != "ready":
+            raise JobError(f"{resource.display_name} has not been verified on this device yet. Open Vedock Desktop and sync local resources.")
     job.status = "claimed"
     job.current_stage = "claimed_by_local_device"
     job.claimed_by_device = device_id

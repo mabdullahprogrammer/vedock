@@ -156,6 +156,9 @@ def login(client: Client, username: str, password: str, token_name: str) -> None
     config = load_config()
     config.update({"api_url": client.api_url, "token": data["token"], "username": data["user"]["username"]})
     save_config(config)
+    client.config = config
+    device_id, device_name = device_identity(client)
+    client.request("POST", "/devices/connect", json={"device_id": device_id, "device_name": device_name, "details": {"platform": platform.platform()}})
     click.echo(f"Logged in to {APP_NAME} as {data['user']['username']}.")
 
 
@@ -194,6 +197,19 @@ def models_list(client: Client) -> None:
 @click.pass_obj
 def models_info(client: Client, model: str) -> None:
     print_json(client.request("GET", f"/models/{model}"))
+
+
+@models.command("add-local")
+@click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--name")
+@click.pass_obj
+def models_add_local(client: Client, path: Path, name: str | None) -> None:
+    """Register a model folder from this device without uploading its weights."""
+    from vedock_cli.resources import register_model
+
+    device_id, device_name = device_identity(client)
+    client.request("POST", "/devices/connect", json={"device_id": device_id, "device_name": device_name, "details": {"platform": platform.platform()}})
+    print_json(register_model(client, device_id, str(path), name))
 
 
 @models.command("fork")
@@ -485,12 +501,26 @@ def datasets_inspect(client: Client, path_or_url: str, name: str | None) -> None
     if path_or_url.startswith(("http://", "https://")):
         data = client.request("POST", "/datasets/import", json={"url": path_or_url, "name": name})
     else:
-        path = Path(path_or_url)
+        path = Path(path_or_url).expanduser().resolve()
         if not path.is_file():
             raise click.ClickException(f"File not found: {path}")
-        with path.open("rb") as stream:
-            data = client.request("POST", "/datasets/import", files={"file": (path.name, stream)}, data={"name": name or path.stem})
+        from vedock_cli.resources import inspect_dataset_file
+
+        data = inspect_dataset_file(str(path))
     print_json(data)
+
+
+@datasets.command("add-local")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--schema", type=click.Choice(["auto", "text_completion", "prompt_response", "instruction", "chat", "classification", "image_classification", "tabular_supervised"]), default="auto", show_default=True)
+@click.pass_obj
+def datasets_add_local(client: Client, path: Path, schema: str) -> None:
+    """Prepare an immutable dataset version locally and register metadata only."""
+    from vedock_cli.resources import register_dataset
+
+    device_id, device_name = device_identity(client)
+    client.request("POST", "/devices/connect", json={"device_id": device_id, "device_name": device_name, "details": {"platform": platform.platform()}})
+    print_json(register_dataset(client, device_id, str(path), schema))
 
 
 @datasets.command("validate")
@@ -603,6 +633,9 @@ def jobs_run(client: Client, job_id: str, device: str, precision: str | None, pu
     from vedock_cli.local_jobs import ensure_runtime, run_claimed_job
 
     device_id, device_name = device_identity(client)
+    from vedock_cli.resources import sync_pending_requests
+
+    sync_pending_requests(client, device_id)
     record = client.request("GET", f"/jobs/{job_id}")
     if record["status"] == "awaiting_device":
         selected_device = ("cuda" if _local_cuda_available() else "cpu") if device == "auto" else device
@@ -681,6 +714,25 @@ def jobs_logs(client: Client, job_id: str, limit: int) -> None:
 @click.pass_obj
 def jobs_cancel(client: Client, job_id: str) -> None:
     print_json(client.request("POST", f"/jobs/{job_id}/cancel"))
+
+
+@jobs.command("resume")
+@click.argument("job_id")
+@click.pass_obj
+def jobs_resume(client: Client, job_id: str) -> None:
+    """Return a failed or cancelled task to the queue without starting it."""
+    print_json(client.request("POST", f"/jobs/{job_id}/resume"))
+
+
+@jobs.command("delete")
+@click.argument("job_id")
+@click.option("--yes", is_flag=True)
+@click.pass_obj
+def jobs_delete(client: Client, job_id: str, yes: bool) -> None:
+    """Delete a terminal task and its logs; finalized model artifacts are kept."""
+    if not yes and not click.confirm(f"Delete task {job_id} and its logs?"):
+        return
+    print_json(client.request("DELETE", f"/jobs/{job_id}"))
 
 
 @jobs.command("release")

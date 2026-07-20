@@ -70,6 +70,83 @@ class ApiToken(TimestampMixin, db.Model):
         return token
 
 
+class ConnectedDevice(TimestampMixin, db.Model):
+    """A user's installed Vedock client.
+
+    The control plane stores identity and capability metadata only. Local paths,
+    model weights, and private dataset contents remain on the device.
+    """
+
+    id = db.Column(db.String(36), primary_key=True, default=new_id)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_uid = db.Column(db.String(120), nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    platform = db.Column(db.String(160), default="")
+    capabilities_json = db.Column(db.JSON, default=dict)
+    last_seen_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    owner = db.relationship("User", backref=db.backref("connected_devices", lazy=True, cascade="all, delete-orphan"))
+    __table_args__ = (db.UniqueConstraint("owner_id", "device_uid", name="uq_connected_device_owner_uid"),)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "device_id": self.device_uid,
+            "name": self.name,
+            "platform": self.platform,
+            "capabilities": self.capabilities_json or {},
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+        }
+
+
+class DeviceResource(TimestampMixin, db.Model):
+    """Opaque metadata for a model or dataset physically held by a client."""
+
+    id = db.Column(db.String(36), primary_key=True, default=new_id)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_uid = db.Column(db.String(120), nullable=False, index=True)
+    kind = db.Column(db.String(24), nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default="pending_device", index=True)
+    display_name = db.Column(db.String(160), nullable=False)
+    path_hint = db.Column(db.String(255), nullable=False, default="")
+    # Used only as a short-lived relay when a path is entered on the web. It is
+    # returned only to the matching authenticated device and erased on verify.
+    pending_locator = db.Column(db.Text)
+    runtime_key = db.Column(db.String(80))
+    task_type = db.Column(db.String(50))
+    output_schema = db.Column(db.String(40))
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    sha256 = db.Column(db.String(64))
+    metadata_json = db.Column(db.JSON, default=dict)
+    last_verified_at = db.Column(db.DateTime(timezone=True))
+    owner = db.relationship("User", backref=db.backref("device_resources", lazy=True, cascade="all, delete-orphan"))
+
+    @property
+    def reference(self) -> str:
+        return f"device://{self.id}"
+
+    def to_dict(self, *, include_locator: bool = False) -> dict[str, Any]:
+        data = {
+            "id": self.id,
+            "device_id": self.device_uid,
+            "kind": self.kind,
+            "status": self.status,
+            "name": self.display_name,
+            "path_hint": self.path_hint,
+            "runtime": self.runtime_key,
+            "task_type": self.task_type,
+            "output_schema": self.output_schema,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "metadata": self.metadata_json or {},
+            "reference": self.reference,
+            "last_verified_at": self.last_verified_at.isoformat() if self.last_verified_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_locator:
+            data["requested_path"] = self.pending_locator
+        return data
+
+
 class RawDataset(TimestampMixin, db.Model):
     id = db.Column(db.String(36), primary_key=True, default=new_id)
     owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)

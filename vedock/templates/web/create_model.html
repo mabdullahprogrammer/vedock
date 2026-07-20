@@ -51,8 +51,8 @@
           <option value="existing" {% if selected_source == 'existing' %}selected{% endif %}>Registered Vedock / StoryMaker model</option>
           <option value="catalog" {% if selected_source == 'catalog' %}selected{% endif %}>GPT-2 model catalog</option>
           <option value="huggingface" {% if selected_source == 'huggingface' %}selected{% endif %}>Hugging Face repository</option>
-          <option value="local" {% if selected_source == 'local' %}selected{% endif %}>Local model directory</option>
-          <option value="checkpoint" {% if selected_source == 'checkpoint' %}selected{% endif %}>Existing checkpoint directory</option>
+          <option value="local" {% if selected_source == 'local' %}selected{% endif %}>Connected-device model folder</option>
+          <option value="checkpoint" {% if selected_source == 'checkpoint' %}selected{% endif %}>Connected-device checkpoint</option>
           <option value="scratch" {% if selected_source == 'scratch' %}selected{% endif %}>New scratch architecture</option>
         </select>
       </label>
@@ -84,12 +84,14 @@
     </div>
 
     <div data-source-fields="local" class="form-grid" hidden>
-      <label>Local model directory<input name="local_path" placeholder="D:\models\my-model"></label>
-      <p class="callout">Vedock validates the configuration, tokenizer, and weight files. The source directory stays read-only.</p>
+      <label>Connected device<select name="device_id">{% for device in devices %}<option value="{{ device.device_uid }}">{{ device.name }} · last connected {{ device.last_seen_at.strftime('%b %d, %H:%M') if device.last_seen_at else 'recently' }}</option>{% else %}<option value="">Open and sign in to Vedock Desktop first</option>{% endfor %}</select></label>
+      <label>Model folder on that device<input name="local_path" placeholder="D:\models\my-model"><small>This path is resolved by the selected user's device. The hosted server never checks its own D: drive.</small></label>
+      <p class="callout">The request appears in Vedock Desktop, which validates configuration, tokenizer, and weights locally. Only the folder name, capability report, size, and hash return to the web.</p>
     </div>
     <div data-source-fields="checkpoint" class="form-grid" hidden>
-      <label>Checkpoint directory<input name="local_path" placeholder="D:\models\checkpoint-1000"></label>
-      <p class="callout">The checkpoint is registered as a read-only source. New outputs always go under Vedock storage.</p>
+      <label>Connected device<select name="device_id">{% for device in devices %}<option value="{{ device.device_uid }}">{{ device.name }}</option>{% else %}<option value="">Open and sign in to Vedock Desktop first</option>{% endfor %}</select></label>
+      <label>Checkpoint folder on that device<input name="local_path" placeholder="D:\models\checkpoint-1000"><small>The path belongs to the connected device, not the hosted web server.</small></label>
+      <p class="callout">The checkpoint remains private and read-only. The connected device resolves it when you explicitly run the task.</p>
     </div>
 
     <div data-source-fields="scratch" class="form-grid" hidden>
@@ -121,13 +123,18 @@
 
   <section class="panel" data-training-section data-wizard-step>
     <div class="panel-head"><div><span class="section-index">04 / DATA AND METHOD</span><h2>Choose validated data and weight updates</h2></div></div>
+    <div class="dataset-compatibility-guide">
+      <div><span class="section-index">WHAT THIS MODEL ACCEPTS</span><h3>{{ accepted_dataset_schemas | length }} compatible training format{{ '' if accepted_dataset_schemas | length == 1 else 's' }}</h3><p>The runtime—not the page—declares these requirements. Only compatible, validated versions appear in the selector.</p></div>
+      <div class="dataset-requirement-cards">{% for item in accepted_dataset_schemas %}<article><strong>{{ item.name | replace('_',' ') | title }}</strong><small>{{ item.description or ('Required fields: ' ~ (item.required_fields | join(', '))) }}</small><code>{{ item.required_fields | join(' · ') }}</code></article>{% endfor %}</div>
+      <div class="dataset-match-summary"><b>{{ dataset_versions | length }} compatible</b><span>from {{ all_dataset_versions | length }} validated dataset version{{ '' if all_dataset_versions | length == 1 else 's' }} in your account</span>{% if not dataset_versions %}<p>No matching version exists yet. Add or prepare a dataset on your connected device, choose one of the formats above, then return here.</p>{% endif %}<a class="button ghost small" href="{{ url_for('web.datasets') }}">Open dataset workspace</a></div>
+    </div>
     <div class="form-grid three">
       <label>Dataset version
         <select name="dataset_version_id" data-dataset-select>
           <option value="">Choose a validated version</option>
           {% for version in dataset_versions %}<option value="{{ version.id }}">{{ version.raw_dataset.name }} - v{{ version.version_number }} - {{ version.row_count }} rows - {{ version.validation_status }}</option>{% endfor %}
         </select>
-        <small><a href="{{ url_for('web.datasets') }}">Prepare another dataset</a></small>
+        <small>{% if dataset_versions %}Newest compatible datasets are listed first.{% else %}Nothing is hidden: there are currently no compatible versions.{% endif %} <a href="{{ url_for('web.datasets') }}">Prepare another dataset</a></small>
       </label>
       <label>Output model name<input name="output_model_name" value="{{ request.form.get('output_model_name', 'my-model') }}" maxlength="160" required></label>
       {% if requested_task == 'causal_lm' %}<label data-finetune-method>Fine-tuning method

@@ -16,6 +16,7 @@ from vedock.extensions import db
 from vedock.models import (
     Conversation,
     DatasetVersion,
+    DeviceResource,
     Job,
     Message,
     ModelFork,
@@ -44,8 +45,8 @@ from vedock.services.dataset_catalog import COMMUNITY_DATASETS, import_community
 from vedock.services.cli_distribution import build_client_archive, build_node_archive
 from vedock.services.hardware import system_report
 from vedock.services.inference import RunnerValidationError, normalize_runtime_result, runner_contract, validate_runner_inputs
-from vedock.services.jobs import JobError, assert_training_enabled, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation
-from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, resolve_latest_pair
+from vedock.services.jobs import JobError, assert_training_enabled, delete_job, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation, resume_job
+from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, record_failed_merge_attempt, resolve_latest_pair
 from vedock.services.model_registry import fork_count, latest_version, recent_chat_models, runnable_models, visible_models
 from vedock.services.model_profiles import model_output_pattern, schema_with_model_defaults, submitted_with_model_defaults, validate_output_pattern
 from vedock.services.model_media import generated_cover_svg, save_model_cover
@@ -58,6 +59,7 @@ from vedock.services.model_sources import (
     resolve_model_source,
 )
 from vedock.services.paths import assert_writable_path
+from vedock.services.device_resources import DeviceResourceError, owner_devices, request_device_path
 
 
 bp = Blueprint("web", __name__)
@@ -255,9 +257,23 @@ def datasets():
     target_model = _visible_model(request.values.get("for_model")) if request.values.get("for_model") else None
     if request.method == "POST":
         try:
-            if request.form.get("source_type") == "community":
+            source_type = request.form.get("source_type")
+            if source_type == "device_path":
+                resource = request_device_path(
+                    current_user,
+                    request.form.get("device_id", ""),
+                    "dataset",
+                    request.form.get("local_path", ""),
+                    display_name=request.form.get("name"),
+                    output_schema=request.form.get("output_schema") or None,
+                )
+                flash(f"Sent {resource.path_hint} to the connected device for private inspection. Keep the Vedock app open, then refresh.", "success")
+                return redirect(url_for("web.datasets", for_model=target_model.slug if target_model else None))
+            if current_app.config.get("NODE_MODE") != "local_compute":
+                raise DatasetError("Hosted Vedock does not copy private datasets to the server. Choose a path on a connected device or add the file from the Vedock desktop app.")
+            if source_type == "community":
                 dataset = import_community_dataset(request.form.get("community_id", ""), current_user)
-            elif request.form.get("source_type") == "url":
+            elif source_type == "url":
                 dataset = import_url(request.form.get("url", ""), current_user, request.form.get("name"), request.form.get("description", ""))
             else:
                 upload = request.files.get("file")
@@ -266,10 +282,11 @@ def datasets():
                 dataset = import_upload(upload, current_user, request.form.get("name"), request.form.get("description", ""))
             flash(f"Imported {dataset.name} without changing the raw source.", "success")
             return redirect(url_for("web.dataset_builder", dataset_id=dataset.id, model=target_model.slug if target_model else None))
-        except (DatasetError, requests.RequestException, OSError, ValueError) as exc:
+        except (DatasetError, DeviceResourceError, requests.RequestException, OSError, ValueError) as exc:
             flash(str(exc), "error")
     records = RawDataset.query.filter_by(owner_id=current_user.id).order_by(RawDataset.created_at.desc()).all()
-    return render_template("web/datasets.html", datasets=records, storage_root=current_app.config["STORAGE_ROOT"] / "datasets", community_datasets=COMMUNITY_DATASETS, target_model=target_model)
+    resources = DeviceResource.query.filter_by(owner_id=current_user.id, kind="dataset").order_by(DeviceResource.created_at.desc()).all()
+    return render_template("web/datasets.html", datasets=records, device_resources=resources, devices=owner_devices(current_user.id), storage_root=current_app.config["STORAGE_ROOT"] / "datasets", community_datasets=COMMUNITY_DATASETS, target_model=target_model)
 
 
 @bp.post("/datasets/<dataset_id>/inspect")
@@ -594,6 +611,9 @@ def playground(slug: str | None):
         preferred = next((item for item in available_models if item.slug == "storymaker-final"), available_models[0])
         slug = preferred.slug
     model = _visible_model(slug)
+    if model.source_type == "device_local" and current_app.config.get("NODE_MODE") != "local_compute":
+        flash("This private model runs in Vedock Desktop on the device that registered its folder.", "info")
+        return redirect(url_for("web.model_details", slug=model.slug))
     version = latest_version(model)
     if not version or model not in available_models:
         abort(404)
@@ -810,6 +830,7 @@ def create_model():
                     "repository": request.form.get("catalog_model") if source_type == "catalog" else request.form.get("repository"),
                     "revision": request.form.get("revision", "main"),
                     "local_path": request.form.get("local_path"),
+                    "device_id": request.form.get("device_id"),
                     "model_name": request.form.get("base_model_name"),
                     "scratch_preset": request.form.get("scratch_preset"),
                     "architecture_family": request.form.get("architecture_family"),
@@ -882,6 +903,9 @@ def create_model():
         build_modes=BUILD_MODES if requested_task == "causal_lm" else [next(mode for mode in BUILD_MODES if mode["id"] == "scratch")],
         model_catalog=PRETRAINED_MODEL_CATALOG,
         scratch_presets=SCRATCH_PRESETS,
+        devices=owner_devices(current_user.id),
+        accepted_dataset_schemas=runtime.get_dataset_schema(),
+        all_dataset_versions=all_versions,
         projects=projects,
         requested_task=requested_task,
     )
@@ -943,6 +967,35 @@ def job_cancel(job_id: str):
     return redirect(url_for("web.job_details", job_id=job.id))
 
 
+@bp.post("/jobs/<job_id>/resume")
+@login_required
+def job_resume(job_id: str):
+    job = db.session.get(Job, job_id)
+    if not job or job.owner_id != current_user.id:
+        abort(404)
+    try:
+        resume_job(job, current_user)
+        flash("Task returned to the connected-device queue. Nothing starts until you press Run.", "success")
+    except JobError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("web.job_details", job_id=job.id))
+
+
+@bp.post("/jobs/<job_id>/delete")
+@login_required
+def job_delete(job_id: str):
+    job = db.session.get(Job, job_id)
+    if not job or job.owner_id != current_user.id:
+        abort(404)
+    try:
+        delete_job(job, current_user)
+        flash("Task and logs deleted. Any finalized model version was preserved.", "success")
+        return redirect(url_for("web.jobs"))
+    except JobError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("web.job_details", job_id=job.id))
+
+
 @bp.get("/conversations")
 @login_required
 def conversations():
@@ -976,6 +1029,7 @@ def conversation_delete(conversation_id: str):
 def merge_models():
     models = visible_models(current_user.id)
     report = None
+    version_a = version_b = None
     if request.method == "POST":
         try:
             first = next((model for model in models if model.id == request.form.get("model_a")), None)
@@ -993,6 +1047,11 @@ def merge_models():
                 flash("Compatible models were merged into a new immutable version.", "success")
                 return redirect(url_for("web.model_details", slug=output.model.slug))
         except (MergeError, ValueError, OSError, RuntimeError) as exc:
+            if request.form.get("action") == "merge" and version_a and version_b:
+                try:
+                    record_failed_merge_attempt(version_a, version_b, request.form.get("merge_method", "auto"), [float(request.form.get("weight_a", 0.5)), float(request.form.get("weight_b", 0.5))], current_user, report or {}, str(exc))
+                except Exception:
+                    db.session.rollback()
             flash(str(exc), "error")
         except Exception as exc:
             db.session.rollback()

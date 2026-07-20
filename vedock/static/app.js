@@ -119,7 +119,14 @@ document.addEventListener("DOMContentLoaded", () => {
       updateSource();
       document.dispatchEvent(new CustomEvent("wizard-refresh"));
     };
-    sourceSelect?.addEventListener("change", updateSource);
+    sourceSelect?.addEventListener("change", () => {
+      if (sourceSelect.value !== "scratch") {
+        const scratchMode = buildModeControls.find((control) => control.value === "scratch" && control.checked);
+        const fineTuneMode = buildModeControls.find((control) => control.value === "fine_tune");
+        if (scratchMode && fineTuneMode) fineTuneMode.checked = true;
+      }
+      updateMode();
+    });
     scratchPreset?.addEventListener("change", updateSource);
     buildModeControls.forEach((control) => control.addEventListener("change", updateMode));
     updateMode();

@@ -23,4 +23,4 @@ The inspected image-captioning and image-completion experiments are not producti
 
 ## Source protection
 
-All inspected legacy and experimental trees were read-only. All implementation files, datasets, metadata, downloads, and tests remain under `D:\LLM\vedock`.
+All inspected legacy and experimental trees were read-only. Source remains under `D:\LLM\vedock`; live Vedock storage and distributions use `E:\Vedock`, while connected users' private model and dataset artifacts remain on their own registered devices.

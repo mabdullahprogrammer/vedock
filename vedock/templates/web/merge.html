@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Merge Models{% endblock %}{% block page_name %}Merge Models{% endblock %}
 {% block content %}
-<header class="page-header"><div><span class="section-index">SAFE COMBINATION</span><h1>Compatibility before arithmetic.</h1><p>Vedock supports compatible weighted LoRA adapters and linear full-weight merges. It blocks mismatched architectures, tensors, tokenizers, memory, or storage.</p></div></header>
+<header class="page-header"><div><span class="section-index">EXPERIMENTAL MODEL COMBINATION</span><h1>Every pair can be checked and attempted.</h1><p>Vedock never hides the attempt button. It reports architecture, tensor, tokenizer, memory, and storage incompatibilities without crashing or writing a corrupt output model.</p></div></header>
 <form method="post" class="panel form-panel">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <div class="form-grid three">
@@ -11,7 +11,7 @@
     <label>Weight B<input type="number" name="weight_b" value="0.3" min="0" max="1" step="0.01"></label>
     <label>Output name<input name="output_name" value="Merged model"></label>
   </div>
-  <div class="form-actions"><button class="button ghost" name="action" value="check">Check compatibility</button><button class="button" name="action" value="merge">Merge only if safe</button></div>
+  <div class="form-actions"><button class="button ghost" name="action" value="check">Preview compatibility</button><button class="button" name="action" value="merge">Attempt experimental merge</button></div>
 </form>
 {% if report %}
 <section class="panel">

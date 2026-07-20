@@ -19,7 +19,7 @@ import webview
 APP_NAME = "Vedock"
 CONTROL_PLANE = "https://vedock.ecorims.com"
 DEFAULT_LOCATION = Path(os.getenv("LOCALAPPDATA", Path.home())) / APP_NAME
-CLIENT_VERSION = "2026.07.20.4"
+CLIENT_VERSION = "2026.07.20.5"
 
 
 def _bundled_logo() -> str:

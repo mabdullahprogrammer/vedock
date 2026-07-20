@@ -12,19 +12,26 @@ from flask import Blueprint, Response, abort, current_app, g, jsonify, request, 
 from flask_login import current_user
 
 from vedock.extensions import db
-from vedock.models import ApiToken, Conversation, DatasetVersion, Job, Message, ModelFork, ModelRecord, ModelVersion, ModelWorkspaceState, RawDataset, User, new_id, utcnow
+from vedock.models import ApiToken, ConnectedDevice, Conversation, DatasetVersion, DeviceResource, Job, Message, ModelFork, ModelRecord, ModelVersion, ModelWorkspaceState, RawDataset, User, new_id, utcnow
 from vedock.runtimes import get_runtime
 from vedock.runtimes.parameters import ParameterValidationError, validate_parameters
 from vedock.services.datasets import DatasetError, import_upload, import_url, inspect_dataset, preview_transform, revalidate_version, save_dataset_version
 from vedock.services.dataset_catalog import COMMUNITY_DATASETS, import_community_dataset
 from vedock.services.hardware import system_report
 from vedock.services.inference import RunnerValidationError, normalize_runtime_result, runner_contract, validate_runner_inputs
-from vedock.services.jobs import JobError, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation
-from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, resolve_latest_pair
+from vedock.services.jobs import JobError, delete_job, enqueue_dataset_transform, enqueue_training, read_job_logs, request_cancellation, resume_job
+from vedock.services.merges import MergeError, compatibility_report, execute_linear_merge, execute_weighted_adapter_merge, record_failed_merge_attempt, resolve_latest_pair
 from vedock.services.model_registry import fork_count, latest_version, visible_models
 from vedock.services.model_profiles import model_output_pattern, schema_with_model_defaults, submitted_with_model_defaults, validate_output_pattern
 from vedock.services.model_media import save_model_cover
 from vedock.services.paths import assert_writable_path
+from vedock.services.device_resources import (
+    DeviceResourceError,
+    owner_devices,
+    record_device,
+    register_device_resource,
+    request_device_path,
+)
 from vedock.services.remote_jobs import (
     claim_job,
     edit_waiting_job,
@@ -93,6 +100,20 @@ def _conversation(conversation_id: str | None) -> Conversation | None:
     if not conversation_id:
         return None
     return Conversation.query.filter_by(id=conversation_id, owner_id=g.api_user.id).first()
+
+
+def _device_resource(resource_id: str) -> DeviceResource | None:
+    return DeviceResource.query.filter_by(id=resource_id, owner_id=g.api_user.id).first()
+
+
+def _device_local_inference(model: ModelRecord):
+    if model.source_type != "device_local":
+        return None
+    return failure(
+        "This private model is stored on a connected device. Open it in Vedock Desktop, which resolves and runs the local folder without exposing its path to the hosted server.",
+        409,
+        "connected_device_required",
+    )
 
 
 def _chat_context(messages: list[Message], prompt: str | None = None, maximum_characters: int = 16_000) -> str:
@@ -194,6 +215,92 @@ def login():
 def whoami():
     user = g.api_user
     return ok({"id": user.id, "username": user.username, "email": user.email})
+
+
+@bp.post("/devices/connect")
+@api_user_required
+def device_connect():
+    payload = request.get_json(silent=True) or {}
+    try:
+        device = record_device(
+            g.api_user,
+            str(payload.get("device_id") or ""),
+            str(payload.get("device_name") or "Vedock device"),
+            payload.get("details") if isinstance(payload.get("details"), dict) else {},
+        )
+        return ok(device.to_dict())
+    except DeviceResourceError as exc:
+        return failure(str(exc), 422, "device_registration_failed")
+
+
+@bp.get("/devices")
+@api_user_required
+def devices_list():
+    return ok([device.to_dict() for device in owner_devices(g.api_user.id)])
+
+
+@bp.get("/device-resources")
+@api_user_required
+def device_resources_list():
+    records = DeviceResource.query.filter_by(owner_id=g.api_user.id).order_by(DeviceResource.created_at.desc()).all()
+    return ok([record.to_dict() for record in records])
+
+
+@bp.post("/device-resources")
+@api_user_required
+def device_resource_register():
+    payload = request.get_json(silent=True) or {}
+    try:
+        resource = register_device_resource(g.api_user, str(payload.get("device_id") or ""), payload)
+        return ok(resource.to_dict())
+    except (DeviceResourceError, TypeError, ValueError) as exc:
+        db.session.rollback()
+        return failure(str(exc), 422, "device_resource_invalid")
+
+
+@bp.post("/device-resources/requests")
+@api_user_required
+def device_resource_request():
+    payload = request.get_json(silent=True) or {}
+    try:
+        resource = request_device_path(
+            g.api_user,
+            str(payload.get("device_id") or ""),
+            str(payload.get("kind") or ""),
+            str(payload.get("path") or ""),
+            display_name=payload.get("name"),
+            runtime_key=payload.get("runtime"),
+            task_type=payload.get("task_type"),
+            output_schema=payload.get("output_schema"),
+        )
+        return ok(resource.to_dict())
+    except DeviceResourceError as exc:
+        return failure(str(exc), 422, "device_resource_request_failed")
+
+
+@bp.get("/device-resources/requests")
+@api_user_required
+def device_resource_requests():
+    device_id = str(request.args.get("device_id") or request.headers.get("X-Vedock-Device") or "")
+    if not ConnectedDevice.query.filter_by(owner_id=g.api_user.id, device_uid=device_id).first():
+        return failure("This connected device is not registered to the account.", 403, "wrong_device")
+    records = DeviceResource.query.filter_by(owner_id=g.api_user.id, device_uid=device_id, status="pending_device").order_by(DeviceResource.created_at).all()
+    return ok([record.to_dict(include_locator=True) for record in records])
+
+
+@bp.post("/device-resources/<resource_id>/verify")
+@api_user_required
+def device_resource_verify(resource_id: str):
+    resource = _device_resource(resource_id)
+    if not resource:
+        return failure("Device resource not found.", 404, "not_found")
+    payload = request.get_json(silent=True) or {}
+    try:
+        verified = register_device_resource(g.api_user, str(payload.get("device_id") or ""), payload, resource=resource)
+        return ok(verified.to_dict())
+    except (DeviceResourceError, TypeError, ValueError) as exc:
+        db.session.rollback()
+        return failure(str(exc), 422, "device_resource_verification_failed")
 
 
 @bp.get("/system/doctor")
@@ -329,6 +436,8 @@ def model_infer(identifier: str):
     model = _model(identifier)
     if not model:
         return failure("Model not found.", 404, "not_found")
+    if blocked := _device_local_inference(model):
+        return blocked
     version = latest_version(model)
     if not version or model.source_type == "scratch_definition":
         return failure("Model has no completed version.", 409, "no_version")
@@ -374,6 +483,8 @@ def model_run(identifier: str):
     model = _model(identifier)
     if not model:
         return failure("Model not found.", 404, "not_found")
+    if blocked := _device_local_inference(model):
+        return blocked
     version = latest_version(model)
     if not version or model.source_type == "scratch_definition":
         return failure("Model has no completed version.", 409, "no_version")
@@ -435,6 +546,8 @@ def model_classify_image(identifier: str):
     model = _model(identifier)
     if not model:
         return failure("Model not found.", 404, "not_found")
+    if blocked := _device_local_inference(model):
+        return blocked
     version = latest_version(model)
     if not version:
         return failure("Model has no completed version.", 409, "no_version")
@@ -475,6 +588,8 @@ def model_stream(identifier: str):
     model = _model(identifier)
     if not model:
         return failure("Model not found.", 404, "not_found")
+    if blocked := _device_local_inference(model):
+        return blocked
     version = latest_version(model)
     payload = request.get_json(silent=True) or {}
     prompt = str(payload.get("prompt") or "")
@@ -856,6 +971,31 @@ def job_cancel(job_id: str):
         return failure(str(exc), 409, "cannot_cancel")
 
 
+@bp.post("/jobs/<job_id>/resume")
+@api_user_required
+def job_resume(job_id: str):
+    job = Job.query.filter_by(id=job_id, owner_id=g.api_user.id).first()
+    if not job:
+        return failure("Job not found.", 404, "not_found")
+    try:
+        return ok(resume_job(job, g.api_user).to_dict())
+    except JobError as exc:
+        return failure(str(exc), 409, "cannot_resume")
+
+
+@bp.delete("/jobs/<job_id>")
+@api_user_required
+def job_delete(job_id: str):
+    job = Job.query.filter_by(id=job_id, owner_id=g.api_user.id).first()
+    if not job:
+        return failure("Job not found.", 404, "not_found")
+    try:
+        deleted_id = delete_job(job, g.api_user)
+        return ok({"deleted": True, "job_id": deleted_id, "result_model_preserved": True})
+    except JobError as exc:
+        return failure(str(exc), 409, "cannot_delete")
+
+
 @bp.get("/conversations")
 @api_user_required
 def conversations_list():
@@ -906,17 +1046,25 @@ def merge_execute():
     second = _model(str(payload.get("model_b") or ""))
     if not first or not second or first.id == second.id:
         return failure("Select two different accessible models.")
+    version_a = version_b = None
+    report: dict[str, Any] = {}
+    method = str(payload.get("method") or "auto")
     try:
         version_a, version_b = resolve_latest_pair(first, second)
         report = compatibility_report(version_a, version_b)
-        method = str(payload.get("method") or "auto")
         if method == "auto":
             method = "weighted_adapter" if report.get("lora_safe") else "linear"
         executor = execute_weighted_adapter_merge if method == "weighted_adapter" else execute_linear_merge
         merge, output = executor(version_a, version_b, float(payload.get("weight_a", 0.5)), float(payload.get("weight_b", 0.5)), g.api_user, str(payload.get("output_name") or "Merged model"))
         return ok({"merge_id": merge.id, "model_version": output.to_dict()})
     except (MergeError, ValueError, OSError, RuntimeError) as exc:
-        return failure(str(exc), 422, "merge_blocked")
+        attempt = None
+        if version_a and version_b:
+            try:
+                attempt = record_failed_merge_attempt(version_a, version_b, method, [float(payload.get("weight_a", 0.5)), float(payload.get("weight_b", 0.5))], g.api_user, report, str(exc))
+            except Exception:
+                db.session.rollback()
+        return failure(str(exc), 422, "merge_attempt_failed", {"attempt_id": attempt.id if attempt else None, "compatibility": report})
 
 
 @bp.post("/export/<identifier>")
