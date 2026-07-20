@@ -161,7 +161,7 @@
 <section class="panel">
   <div class="panel-head"><div><span class="section-index">SAVED PROJECTS</span><h2>Continue from a draft</h2></div></div>
   <div class="job-list">
-    {% for project in projects %}<a href="{{ url_for('web.project_details', project_id=project.id) }}"><span class="status {{ project.status }}">{{ project.status }}</span><span><strong>{{ project.name }}</strong><small>{{ project.task_type | replace('_',' ') | title }} - {{ project.training_method | replace('_',' ') }}</small></span><b>View</b></a>{% endfor %}
+    {% for project in projects %}<article class="saved-project-row"><a href="{{ url_for('web.project_details', project_id=project.id) }}"><span class="status {{ project.status }}">{{ project.status }}</span><span><strong>{{ project.name }}</strong><small>{{ project.task_type | replace('_',' ') | title }} - {{ project.training_method | replace('_',' ') }}</small></span><b>View</b></a><form method="post" action="{{ url_for('web.project_delete', project_id=project.id) }}" onsubmit="return confirm('Delete this saved project? Any separate task or finalized model will be preserved.')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="project-delete-button" aria-label="Delete {{ project.name }}">Delete</button></form></article>{% endfor %}
   </div>
 </section>
 {% endif %}

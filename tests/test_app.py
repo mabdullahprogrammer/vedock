@@ -12,6 +12,8 @@ def test_desktop_page_renders_complete_html():
     assert "Run on this computer" in page
     assert "Publish after final review" in page
     assert "vedock.ecorims.com" in page
+    assert "api.dispatch(name,args)" in page
+    assert "Connecting securely to this device" in page
 
 
 def test_installer_folder_result_and_html_use_a_real_input_name():
@@ -29,6 +31,9 @@ def test_installer_folder_result_and_html_use_a_real_input_name():
     assert "locationInput().value" in page
     assert "const installButton=()=>byId('install')" in page
     assert "install.disabled" not in page
+    assert "api.dispatch(action,payload)" in page
+    assert "api.choose_folder" not in page
+    assert bridge.dispatch("choose_folder") == r"E:\Users\Ada\Vedock"
 
 
 def test_installer_reuses_a_saved_custom_install(monkeypatch, tmp_path):

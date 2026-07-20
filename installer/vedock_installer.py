@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import base64
+import queue
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 import zipfile
@@ -19,7 +21,7 @@ import webview
 APP_NAME = "Vedock"
 CONTROL_PLANE = "https://vedock.ecorims.com"
 DEFAULT_LOCATION = Path(os.getenv("LOCALAPPDATA", Path.home())) / APP_NAME
-CLIENT_VERSION = "2026.07.20.6"
+CLIENT_VERSION = "2026.07.21.1"
 
 
 def _bundled_logo() -> str:
@@ -27,6 +29,12 @@ def _bundled_logo() -> str:
     candidates = [bundle_root / "assets" / "logo.png"]
     path = next((candidate for candidate in candidates if candidate.is_file()), None)
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii") if path else ""
+
+
+def _bundled_icon() -> Path | None:
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    icon = bundle_root / "assets" / "logo.ico"
+    return icon if icon.is_file() else None
 
 
 def _hidden_flags() -> int:
@@ -99,13 +107,29 @@ class InstallerBridge:
         return {"installed": installed, "update_available": existing and not installed}
 
     def choose_folder(self) -> str:
-        result = self.window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(DEFAULT_LOCATION.parent))
+        result = self.window.create_file_dialog(webview.FileDialog.FOLDER, directory=str(DEFAULT_LOCATION.parent))
         if not result:
             return ""
         # pywebview backends return either one string or a list/tuple.  Indexing
         # a string was previously returning only its first character (for
         # example, "C"), which made Browse appear broken.
         return str(result[0] if isinstance(result, (list, tuple)) else result)
+
+    def dispatch(self, action: str, payload: dict[str, Any] | None = None) -> Any:
+        """Expose one stable WebView method instead of a timing-sensitive method table."""
+        values = dict(payload or {})
+        if action == "state":
+            return self.state()
+        if action == "choose_folder":
+            return self.choose_folder()
+        if action == "check_installation":
+            return self.check_installation(str(values.get("location") or ""))
+        if action == "install":
+            return self.install(str(values.get("location") or ""), bool(values.get("desktop_shortcut", True)))
+        if action == "launch":
+            self.launch()
+            return {"ok": True}
+        raise ValueError(f"Unknown installer action: {action}")
 
     def _emit(self, message: str, percent: int, level: str = "normal") -> None:
         self.window.evaluate_js(f"window.installProgress({json.dumps(message)}, {int(percent)}, {json.dumps(level)})")
@@ -114,11 +138,35 @@ class InstallerBridge:
         self._emit(message, percent)
         process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", creationflags=_hidden_flags())
         assert process.stdout
-        tail = []
-        for line in process.stdout:
-            if line.strip():
-                tail.append(line.strip())
-                tail = tail[-8:]
+        output: queue.Queue[str | None] = queue.Queue()
+
+        def read_output() -> None:
+            assert process.stdout
+            for line in process.stdout:
+                output.put(line)
+            output.put(None)
+
+        threading.Thread(target=read_output, daemon=True).start()
+        tail: list[str] = []
+        last_update = time.monotonic()
+        stream_finished = False
+        while process.poll() is None or not stream_finished:
+            try:
+                line = output.get(timeout=0.8)
+                if line is None:
+                    stream_finished = True
+                    continue
+                cleaned = line.strip()
+                if cleaned:
+                    tail.append(cleaned)
+                    tail = tail[-8:]
+                    if time.monotonic() - last_update >= 0.8:
+                        self._emit(f"{message} · {cleaned[:90]}", percent)
+                        last_update = time.monotonic()
+            except queue.Empty:
+                if time.monotonic() - last_update >= 3:
+                    self._emit(f"{message} · still working", percent)
+                    last_update = time.monotonic()
         if process.wait() != 0:
             raise RuntimeError("\n".join(tail) or f"Installation command failed with exit code {process.returncode}.")
 
@@ -129,11 +177,20 @@ class InstallerBridge:
         )
         try:
             with urllib.request.urlopen(request, timeout=90) as response, destination.open("wb") as output:
+                expected = int(response.headers.get("Content-Length") or 0)
+                received = 0
+                last_update = 0.0
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
+                    received += len(chunk)
+                    now = time.monotonic()
+                    if now - last_update >= 0.5:
+                        progress = 20 + min(12, int((received / expected) * 12)) if expected else 20
+                        self._emit(f"Downloading Vedock · {received / (1024 * 1024):.1f} MiB", progress)
+                        last_update = now
         except Exception as exc:
             destination.unlink(missing_ok=True)
             raise RuntimeError(
@@ -274,9 +331,34 @@ class InstallerBridge:
         self.window.destroy()
 
 
+def _set_windows_identity() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Vedock.Installer")
+        icon = _bundled_icon()
+        if not icon:
+            return
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.restype = ctypes.c_void_p
+        user32.LoadImageW.restype = ctypes.c_void_p
+        handle = user32.FindWindowW(None, "Install Vedock")
+        loaded = user32.LoadImageW(None, str(icon), 1, 0, 0, 0x0010)
+        if handle and loaded:
+            user32.SendMessageW(handle, 0x0080, 0, loaded)
+            user32.SendMessageW(handle, 0x0080, 1, loaded)
+            set_class_icon = getattr(user32, "SetClassLongPtrW", user32.SetClassLongW)
+            set_class_icon(handle, -14, loaded)
+            set_class_icon(handle, -34, loaded)
+    except Exception:
+        pass
+
+
 HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 :root{--blue:#1769ff;--ink:#111318;--muted:#6d7480;--line:#e3e6eb;--paper:#f7f8fa;font-family:Inter,'Segoe UI',sans-serif}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);height:100vh;overflow:hidden}.layout{height:100vh;display:grid;grid-template-columns:310px 1fr}.visual{background:#0c0f15;position:relative;display:flex;flex-direction:column;justify-content:space-between;padding:38px;color:#fff;overflow:hidden}.visual:before,.visual:after{content:'';position:absolute;border:1px solid #1769ff66;transform:rotate(45deg)}.visual:before{width:320px;height:320px;left:-145px;top:130px}.visual:after{width:470px;height:470px;left:-220px;top:55px}.mark{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:800;z-index:1}.mark img{width:42px;height:42px;object-fit:contain}.visual-copy{z-index:1}.visual h1{font-size:39px;line-height:.98;letter-spacing:-.05em;margin:10px 0}.visual p{color:#929aaa}.steps{display:grid;gap:11px;z-index:1}.steps span{font-size:11px;color:#778193}.steps b{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:8px;border:1px solid #33405a;border-radius:50%;color:#82aaff}.content{padding:40px 44px 24px;display:grid;grid-template-rows:auto 1fr auto;min-width:0}.eyebrow{font-size:10px;color:var(--blue);font-weight:800;letter-spacing:.13em}.content h2{font-size:32px;margin:7px 0}.content>header p{color:var(--muted);margin:0}.card{align-self:center;background:white;border:1px solid var(--line);border-radius:12px;padding:23px;box-shadow:0 16px 50px #18284a0b}.included{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:20px}.included div{padding:12px;border:1px solid #edf0f4;border-radius:8px}.included b{display:block;font-size:12px}.included small{color:var(--muted)}label{display:grid;gap:6px;font-size:11px;font-weight:750}.path{display:grid;grid-template-columns:1fr auto;gap:7px}input{border:1px solid #d5d9e0;border-radius:8px;padding:11px;font:12px Consolas,monospace}button{font:inherit;cursor:pointer}.browse{border:1px solid #d5d9e0;background:#fff;border-radius:8px;padding:0 14px}.check{display:flex;align-items:center;gap:8px;margin-top:14px;font-weight:500}.progress-wrap{margin-top:20px}.progress{height:6px;background:#e9ecf1;border-radius:8px;overflow:hidden}.progress i{display:block;width:0;height:100%;background:linear-gradient(90deg,var(--blue),#7657ff);transition:.3s}.progress-row{display:flex;justify-content:space-between;margin-top:8px;color:var(--muted);font-size:11px}.footer{border-top:1px solid var(--line);padding-top:18px;display:flex;justify-content:space-between;align-items:center}.footer small{color:var(--muted)}.install{border:0;background:var(--blue);color:white;border-radius:8px;padding:11px 22px;font-weight:750;min-width:130px}.install:disabled{opacity:.55}.error{color:#b52d25!important}.success{color:#177b46!important}@media(max-width:720px){.layout{grid-template-columns:1fr}.visual{display:none}.content{padding:28px}}
-</style></head><body><div class="layout"><aside class="visual"><div class="mark"><img src="__VEDOCK_LOGO__"><b>VEDOCK</b></div><div class="visual-copy"><span class="eyebrow">CONNECTED COMPUTE</span><h1>Build there.<br>Train here.</h1><p>Your tasks stay synchronized. Your hardware starts only when you choose.</p></div><div class="steps"><span><b>1</b>Install the connected client</span><span><b>2</b>Sign in to your Vedock account</span><span><b>3</b>Claim and run a training task</span></div></aside><main class="content"><header><span class="eyebrow">WINDOWS 10 / 11</span><h2>Install Vedock</h2><p>A small global CLI and desktop controller. ML runtimes download only when required.</p></header><section class="card"><div class="included"><div><b>Global `vedock` command</b><small>Use it from any terminal</small></div><div><b>Desktop controller</b><small>White, black and blue native UI</small></div><div><b>Hosted connection</b><small>vedock.ecorims.com</small></div><div><b>On-demand runtimes</b><small>PyTorch, LoRA and CUDA when needed</small></div></div><label>Install location<div class="path"><input id="installLocation"><button class="browse" onclick="chooseFolder()">Browse</button></div></label><label class="check"><input id="shortcut" type="checkbox" checked>Create desktop shortcut</label><div class="progress-wrap"><div class="progress"><i id="bar"></i></div><div class="progress-row"><span id="message">Ready to install</span><b id="percent">0%</b></div></div></section><footer class="footer"><small>No ports, server fields or developer setup.</small><button id="install" class="install" onclick="beginInstall()">Install Vedock</button></footer></main></div><script>
+</style></head><body><div class="layout"><aside class="visual"><div class="mark"><img src="__VEDOCK_LOGO__"><b>VEDOCK</b></div><div class="visual-copy"><span class="eyebrow">CONNECTED COMPUTE</span><h1>Build there.<br>Train here.</h1><p>Your tasks stay synchronized. Your hardware starts only when you choose.</p></div><div class="steps"><span><b>1</b>Install the connected client</span><span><b>2</b>Sign in to your Vedock account</span><span><b>3</b>Claim and run a training task</span></div></aside><main class="content"><header><span class="eyebrow">WINDOWS 10 / 11</span><h2>Install Vedock</h2><p>A small global CLI and desktop controller. ML runtimes download only when required.</p></header><section class="card"><div class="included"><div><b>Global `vedock` command</b><small>Use it from any terminal</small></div><div><b>Desktop controller</b><small>White, black and blue native UI</small></div><div><b>Hosted connection</b><small>vedock.ecorims.com</small></div><div><b>On-demand runtimes</b><small>PyTorch, LoRA and CUDA when needed</small></div></div><label>Install location<div class="path"><input id="installLocation" disabled><button id="browse" type="button" class="browse" onclick="chooseFolder()" disabled>Browse</button></div></label><label class="check"><input id="shortcut" type="checkbox" checked disabled>Create desktop shortcut</label><div class="progress-wrap"><div class="progress"><i id="bar"></i></div><div class="progress-row"><span id="message">Connecting installer...</span><b id="percent">0%</b></div></div></section><footer class="footer"><small>No ports, server fields or developer setup.</small><button id="install" type="button" class="install" onclick="beginInstall()" disabled>Connecting...</button></footer></main></div><script>
 const byId=id=>document.getElementById(id);
 const locationInput=()=>byId('installLocation');
 const installButton=()=>byId('install');
@@ -285,15 +367,19 @@ const progressPercent=()=>byId('percent');
 const progressBar=()=>byId('bar');
 const shortcutInput=()=>byId('shortcut');
 function setError(error){const text=error&&error.message?error.message:String(error||'Unexpected installer error');progressMessage().textContent=text;progressMessage().className='error';const button=installButton();button.disabled=false;button.textContent='Try again';button.onclick=beginInstall}
-async function showInstalled(){const button=installButton();button.disabled=false;button.textContent='Open Vedock';progressMessage().textContent='Vedock is current — nothing will be downloaded';progressMessage().className='success';progressPercent().textContent='100%';progressBar().style.width='100%';button.onclick=()=>window.pywebview.api.launch()}
 function showReady(state){const button=installButton();button.disabled=false;button.onclick=beginInstall;button.textContent=state.update_available?'Update Vedock':'Install Vedock';progressMessage().textContent=state.update_available?'A newer connected client is ready':'Ready to install';progressMessage().className='';progressPercent().textContent='0%';progressBar().style.width='0%'}
-async function init(){try{const state=await window.pywebview.api.state();locationInput().value=state.location;state.installed?showInstalled():showReady(state)}catch(error){setError(error)}}
-async function chooseFolder(){try{const value=await window.pywebview.api.choose_folder();if(!value)return;locationInput().value=value;const state=await window.pywebview.api.check_installation(value);state.installed?showInstalled():showReady(state)}catch(error){setError(error)}}
-async function beginInstall(){try{const chosen=locationInput().value.trim();if(!chosen){setError('Choose an install location first.');return}const state=await window.pywebview.api.check_installation(chosen);if(state.installed){showInstalled();return}const button=installButton();button.disabled=true;button.textContent=state.update_available?'Updating…':'Installing…';const result=await window.pywebview.api.install(chosen,shortcutInput().checked);if(!result||result.ok===false)setError(result&&result.message?result.message:'The installer could not start.')}catch(error){setError(error)}}
 window.installProgress=(text,value,level)=>{progressMessage().textContent=text;progressMessage().className=level;progressPercent().textContent=value+'%';progressBar().style.width=value+'%'};
-window.installComplete=()=>showInstalled();
-window.installFailed=()=>{const button=installButton();button.disabled=false;button.textContent='Try again';button.onclick=beginInstall};
-window.addEventListener('pywebviewready',init);
+let stableNativeReady=false;
+const stableWait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+async function waitForNative(){for(let attempt=0;attempt<80;attempt++){if(window.pywebview&&window.pywebview.api&&typeof window.pywebview.api.dispatch==='function'){stableNativeReady=true;locationInput().disabled=false;shortcutInput().disabled=false;document.getElementById('browse').disabled=false;return}await stableWait(100)}throw new Error('The native installer bridge did not start. Close this window and run the newest Vedock installer again.')}
+async function nativeCall(action,payload={}){if(!stableNativeReady)await waitForNative();return window.pywebview.api.dispatch(action,payload)}
+async function showInstalled(){const button=installButton();button.disabled=false;button.textContent='Open Vedock';progressMessage().textContent='Vedock is current - nothing will be downloaded';progressMessage().className='success';progressPercent().textContent='100%';progressBar().style.width='100%';button.onclick=()=>nativeCall('launch')}
+async function initStable(){try{await waitForNative();const state=await nativeCall('state');locationInput().value=state.location;state.installed?showInstalled():showReady(state)}catch(error){setError(error)}}
+async function chooseFolder(){const browse=document.getElementById('browse');try{browse.disabled=true;progressMessage().textContent='Choose an installation folder...';const value=await nativeCall('choose_folder');browse.disabled=false;if(!value){progressMessage().textContent='Folder selection cancelled';return}locationInput().value=value;const state=await nativeCall('check_installation',{location:value});state.installed?showInstalled():showReady(state)}catch(error){browse.disabled=false;setError(error)}}
+async function beginInstall(){const browse=document.getElementById('browse');try{const chosen=locationInput().value.trim();if(!chosen){setError('Choose an install location first.');return}const state=await nativeCall('check_installation',{location:chosen});if(state.installed){showInstalled();return}const button=installButton();button.disabled=true;browse.disabled=true;locationInput().disabled=true;shortcutInput().disabled=true;button.textContent=state.update_available?'Updating...':'Installing...';const result=await nativeCall('install',{location:chosen,desktop_shortcut:shortcutInput().checked});if(!result||result.ok===false)setError(result&&result.message?result.message:'The installer could not start.')}catch(error){setError(error)}}
+window.installComplete=()=>{locationInput().disabled=false;shortcutInput().disabled=false;document.getElementById('browse').disabled=false;showInstalled()};
+window.installFailed=()=>{locationInput().disabled=false;shortcutInput().disabled=false;document.getElementById('browse').disabled=false;const button=installButton();button.disabled=false;button.textContent='Try again';button.onclick=beginInstall};
+window.addEventListener('pywebviewready',initStable);
 </script></body></html>"""
 
 
@@ -302,10 +388,17 @@ def installer_html() -> str:
 
 
 def main() -> None:
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Vedock.Installer")
+        except Exception:
+            pass
     bridge = InstallerBridge()
     window = webview.create_window("Install Vedock", html=installer_html(), js_api=bridge, width=980, height=650, min_size=(720, 540), background_color="#f7f8fa")
     bridge.window = window
-    webview.start(debug=False)
+    webview.start(_set_windows_identity, debug=False)
 
 
 if __name__ == "__main__":

@@ -963,6 +963,23 @@ def project_details(project_id: str):
     return render_template("web/project_details.html", project=project, report=system_report(), version=latest_version(project.base_model))
 
 
+@bp.post("/projects/<project_id>/delete")
+@login_required
+def project_delete(project_id: str):
+    project = db.session.get(ModelProject, project_id)
+    if not project or project.owner_id != current_user.id:
+        abort(404)
+    name = project.name
+    job_id = str((project.config_json or {}).get("job_id") or "")
+    db.session.delete(project)
+    db.session.commit()
+    if job_id:
+        flash(f"Project {name} was removed from drafts. Its separate training task and finalized model were preserved.", "success")
+    else:
+        flash(f"Draft project {name} was deleted.", "success")
+    return redirect(url_for("web.create_model"))
+
+
 @bp.get("/jobs")
 @login_required
 def jobs():

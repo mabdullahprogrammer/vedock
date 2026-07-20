@@ -119,6 +119,7 @@ def test_uploaded_dataset_builder_renders_and_scratch_project_stays_draft(regist
     review = registered_client.get(project.headers["Location"])
     assert review.status_code == 200
     assert b"random" not in review.data.lower() or b"scratch" in review.data.lower()
+    assert b"Delete project" in review.data
     with app.app_context():
         from vedock.models import Job, ModelProject
 
@@ -130,3 +131,7 @@ def test_uploaded_dataset_builder_renders_and_scratch_project_stays_draft(regist
     assert listing.status_code == 200
     assert b"Download JSONL" in listing.data
     assert b"processed" in listing.data.lower()
+    deleted = registered_client.post(f"{project.headers['Location']}/delete")
+    assert deleted.status_code == 302
+    with app.app_context():
+        assert ModelProject.query.filter_by(name="Scratch Story Project").first() is None
