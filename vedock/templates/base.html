@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="description" content="{{ branding.tagline }}">
+  <title>{% block title %}{{ branding.name }}{% endblock %} · {{ branding.name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=20260720-ui3">
+  <script defer src="{{ url_for('static', filename='app.js') }}?v=20260720-ui3"></script>
+</head>
+<body class="{% if current_user.is_authenticated %}app-shell{% else %}public-shell{% endif %}">
+  {% if current_user.is_authenticated %}
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="{{ url_for('main.dashboard') }}">
+      <img class="brand-logo" src="{{ url_for('main.brand_logo') }}" alt="{{ branding.short_name }}">
+      <span><strong>{{ branding.short_name }}</strong><small>AI development studio</small></span>
+    </a>
+    <nav class="nav-list" aria-label="Primary navigation">
+      <a href="{{ url_for('main.dashboard') }}" class="{% if request.endpoint == 'main.dashboard' %}active{% endif %}"><span>01</span> Dashboard</a>
+      <a href="{{ url_for('web.create_model') }}" class="{% if request.endpoint == 'web.create_model' %}active{% endif %}"><span>02</span> Create Model</a>
+      <a href="{{ url_for('web.datasets') }}" class="{% if 'dataset' in request.endpoint %}active{% endif %}"><span>03</span> Datasets</a>
+      <a href="{{ url_for('web.jobs') }}" class="{% if 'job' in request.endpoint %}active{% endif %}"><span>04</span> Training Jobs</a>
+      <a href="{{ url_for('web.models') }}" class="{% if request.endpoint in ['web.models','web.model_details','web.playground','web.playground_stream'] %}active{% endif %}"><span>05</span> Explore Models</a>
+      <a href="{{ url_for('web.merge_models') }}" class="{% if request.endpoint == 'web.merge_models' %}active{% endif %}"><span>06</span> Merge Models</a>
+    </nav>
+    <nav class="nav-list nav-secondary" aria-label="Secondary navigation">
+      <a href="{{ url_for('web.developer') }}"><span>↗</span> Developer / CLI</a>
+      <a href="{{ url_for('web.system') }}"><span>◎</span> System</a>
+      <a href="{{ url_for('web.settings') }}"><span>·</span> Settings</a>
+    </nav>
+    <div class="sidebar-profile">
+      <span class="avatar">{{ current_user.username[0] | upper }}</span>
+      <span><strong>{{ current_user.username }}</strong><small>{{ current_user.email }}</small></span>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="icon-button" type="submit" title="Sign out">↗</button>
+      </form>
+    </div>
+  </aside>
+  <div class="app-main">
+    <header class="topbar">
+      <button class="menu-button" type="button" data-sidebar-toggle aria-label="Toggle navigation">☰</button>
+      <div class="breadcrumb"><span>{{ branding.short_name }}</span><b>/</b><strong>{% block page_name %}Workspace{% endblock %}</strong></div>
+      <div class="status-pill"><i></i> {{ 'Local compute' if config.NODE_MODE == 'local_compute' else 'Hosted inference' }} · :5464</div>
+    </header>
+  {% else %}
+  <header class="public-header">
+    <a class="brand" href="{{ url_for('main.landing') }}"><img class="brand-logo" src="{{ url_for('main.brand_logo') }}" alt="{{ branding.short_name }}"><strong>{{ branding.short_name }}</strong></a>
+    <nav>
+      <a href="#workflow">Workflow</a>
+      <a href="#control">Full control</a>
+      <a href="{{ url_for('auth.login') }}">Log in</a>
+      <a class="button small" href="{{ url_for('auth.register') }}">Open studio</a>
+    </nav>
+  </header>
+  {% endif %}
+
+  <main class="{% if current_user.is_authenticated %}content{% else %}public-content{% endif %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="toast-stack" style="color:black" aria-live="polite">
+        {% for category, message in messages %}<div class="toast {{ category }}"><span>{{ message }}</span><button type="button" aria-label="Dismiss">×</button></div>{% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if current_user.is_authenticated %}</div>{% else %}
+  <footer class="public-footer"><strong>{{ branding.name }}</strong><span>{{ branding.tagline }}</span><small>Local compute node · Capability-driven runtimes</small></footer>
+  {% endif %}
+</body>
+</html>

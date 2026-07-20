@@ -1,0 +1,78 @@
+{% extends "base.html" %}{% block title %}{{ model.name }}{% endblock %}{% block page_name %}Chat{% endblock %}
+{% block content %}
+<div class="model-chat-shell immersive-chat">
+  <aside class="chat-list-rail">
+    <header><div><span class="section-index">YOUR CHATS</span><h2>Conversations</h2></div><a href="{{ url_for('web.playground', slug=model.slug) }}" title="New chat">＋</a></header>
+    <div class="all-chat-list">
+      {% for item in all_conversations %}
+      <a class="{{ 'active' if conversation and item.id == conversation.id else '' }}" href="{{ url_for('web.playground', slug=item.chat_model.slug, conversation=item.id) }}">
+        <img src="{{ url_for('web.model_cover', slug=item.chat_model.slug) }}" alt="">
+        <span><strong>{{ item.title }}</strong><small>{{ item.chat_model.name }} · {{ item.updated_at.strftime('%b %d') if item.updated_at else '' }}</small></span>
+      </a>
+      {% else %}<div class="chat-list-empty"><p>No chats yet.</p><small>Choose a model from Community to begin.</small></div>{% endfor %}
+    </div>
+    <a class="explore-models" href="{{ url_for('web.models') }}">Explore models</a>
+  </aside>
+
+  <section class="chat-workspace">
+    <header class="chat-model-header centered-model-header">
+      <div class="chat-heading-identity">
+        <img src="{{ url_for('web.model_cover', slug=model.slug) }}" alt="{{ model.name }}">
+        <div><h1>{{ model.name }}</h1><p>by @{{ model.owner.username if model.owner else 'vedock' }}</p></div>
+      </div>
+      <button class="round-button" type="button" data-model-drawer-toggle aria-label="Model details">•••</button>
+    </header>
+
+    <div class="chat-messages" data-chat-thread>
+      {% if conversation %}
+        {% for message in conversation.messages %}<article class="{{ message.role }}"><span>{{ 'You' if message.role == 'user' else model.name }}</span><p>{{ message.content }}</p></article>{% endfor %}
+      {% else %}
+        <div class="chat-empty"><img src="{{ url_for('web.model_cover', slug=model.slug) }}" alt=""><h2>{{ model.name }}</h2><p>{{ model.description or 'Start a new conversation.' }}</p><small>This is a fresh chat. Earlier chats are not included unless you open one from history.</small></div>
+      {% endif %}
+    </div>
+
+    <form id="model-chat-form" method="post" action="{{ url_for('api.model_stream', identifier=model.slug) }}" class="chat-composer" data-chat-form data-fallback-action="{{ url_for('web.playground', slug=model.slug) }}" data-stop-action="{{ url_for('api.model_stop', identifier=model.slug) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="conversation_id" value="{{ conversation.id if conversation else '' }}" data-conversation-id>
+      <label><span class="sr-only">Message</span><textarea name="prompt" rows="2" maxlength="20000" placeholder="Message {{ model.name }}" required>{{ prompt }}</textarea></label>
+      <div class="chat-submit-actions"><button class="round-button stop" type="button" data-stop-button hidden><span class="sr-only">Stop</span><b aria-hidden="true">■</b></button><button class="round-button send" type="submit" data-send-button><span class="sr-only">Send</span><b aria-hidden="true">↑</b></button></div>
+      <small data-chat-status>Enter to send · Shift+Enter for a new line</small>
+      <div class="chat-parameter-payload">{% include 'web/_parameters.html' %}</div>
+    </form>
+  </section>
+
+  <aside class="model-detail-drawer" data-model-drawer>
+    <header><span class="section-index">MODEL</span><button class="round-button" type="button" data-model-drawer-close>×</button></header>
+    <section data-drawer-overview>
+      <img class="drawer-cover" src="{{ url_for('web.model_cover', slug=model.slug) }}" alt="{{ model.name }}">
+      <h2>{{ model.name }}</h2><p class="drawer-creator">by @{{ model.owner.username if model.owner else 'vedock' }}</p><p>{{ model.description }}</p>
+      <div class="reaction-row">
+        <form method="post" action="{{ url_for('web.model_reaction', slug=model.slug, value='up') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="{{ 'active' if reaction and reaction.value == 'up' else '' }}">👍 <span>{{ reaction_counts.up }}</span></button></form>
+        <form method="post" action="{{ url_for('web.model_reaction', slug=model.slug, value='down') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="{{ 'active' if reaction and reaction.value == 'down' else '' }}">👎 <span>{{ reaction_counts.down }}</span></button></form>
+      </div>
+      <div class="drawer-actions">
+        <a href="{{ url_for('web.playground', slug=model.slug) }}"><span>＋</span><b>New chat</b><small>Start without earlier memory</small></a>
+        <button type="button" data-show-history><span>◷</span><b>History</b><small>{{ model_conversations | length }} conversations</small></button>
+        <button type="button" data-customize-open><span>◇</span><b>Customize model</b><small>Context, parameters and Remix</small></button>
+        {% if conversation %}<form class="drawer-delete-chat" method="post" action="{{ url_for('web.conversation_delete', conversation_id=conversation.id) }}" onsubmit="return confirm('Delete this chat?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit"><span>×</span><b>Delete this chat</b><small>Removes this conversation and its messages</small></button></form>{% endif %}
+        <a href="{{ url_for('web.model_details', slug=model.slug) }}"><span>ⓘ</span><b>Model details</b><small>Versions, training and ownership</small></a>
+      </div>
+      <div class="model-runtime-note"><i></i><span><b data-model-load-status>{{ 'Loaded in memory' if capabilities.loaded_model_path else 'Loads on first message' }}</b><small>Reused across messages on the Vedock host</small></span></div>
+    </section>
+    <section data-drawer-history hidden>
+      <button class="back-link" type="button" data-hide-history>← Model</button><h2>Chat history</h2>
+      <div class="drawer-history-list">{% for item in model_conversations %}<a class="{{ 'active' if conversation and item.id == conversation.id else '' }}" href="{{ url_for('web.playground', slug=model.slug, conversation=item.id) }}"><strong>{{ item.title }}</strong><small>{{ item.messages | length }} messages · {{ item.updated_at.strftime('%b %d, %H:%M') if item.updated_at else '' }}</small></a>{% else %}<p>No earlier chats with this model.</p>{% endfor %}</div>
+    </section>
+  </aside>
+
+  <dialog class="customize-dialog" data-customize-dialog>
+    <header><div><span class="section-index">CUSTOMIZE FOR THIS CHAT</span><h2>{{ model.name }}</h2><p>Changes affect generation and context. They do not modify the public model.</p></div><button class="round-button" type="button" data-customize-close>×</button></header>
+    <div class="customize-tabs"><button class="active" type="button">Context & parameters</button></div>
+    <div class="customize-scroll">
+      <section class="context-controls"><h3>Context</h3><label class="switch"><input form="model-chat-form" type="checkbox" name="use_history" value="true" {% if chat_settings.get('use_history', true) %}checked{% endif %}><i></i><em>Include messages from this chat</em></label><label>Context budget<input form="model-chat-form" type="number" step="any" name="context_limit" value="{{ chat_settings.get('context_limit', 16000) }}"><small>Characters retained before token-aware model truncation.</small></label><label>Replace context<textarea form="model-chat-form" name="context_override" rows="5" placeholder="Optional context. Use {prompt} to place the next message.">{{ chat_settings.get('context_override', '') }}</textarea></label><details><summary>Current available context</summary><pre>{{ context_preview or 'No earlier messages in this fresh chat.' }}</pre></details></section>
+      <section><div class="customize-section-head"><div><h3>Model parameters</h3><p>Enter any numeric value. The runtime reports genuine incompatibilities clearly.</p></div><label class="compact-switch"><input type="checkbox" data-advanced-toggle-checkbox><span>Advanced</span></label></div><div data-visible-parameters></div></section>
+    </div>
+    <footer><div><b>Want to change the model itself?</b><small>Remix makes a private editable model from this version.</small></div>{% if model.owner_id != current_user.id %}<form method="post" action="{{ url_for('web.model_fork', slug=model.slug) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button" type="submit">Remix this model</button></form>{% else %}<a class="button" href="{{ url_for('web.model_details', slug=model.slug) }}">Edit owned model</a>{% endif %}</footer>
+  </dialog>
+</div>
+{% endblock %}

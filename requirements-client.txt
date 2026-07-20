@@ -1,0 +1,4 @@
+click>=8,<9
+requests>=2.31,<3
+psutil>=5.9,<8
+pywebview>=5,<7

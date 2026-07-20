@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Create Model{% endblock %}{% block page_name %}Create Model{% endblock %}
+{% block content %}
+{% if config.NODE_MODE != 'local_compute' %}<section class="local-compute-gate"><div><span class="section-index">CONNECTED TRAINING</span><h2>Configure on the web. Execute on your computer.</h2><p>Saving this setup creates an inert account task. Only your authenticated Vedock CLI or desktop app can claim and run it.</p></div><a class="button" href="{{ url_for('web.installer_download') }}">Get connected client</a></section>{% endif %}
+<header class="page-header">
+  <div>
+    <span class="section-index">MODEL STUDIO</span>
+    <h1>Build, import, continue, or combine.</h1>
+    <p>Create a reviewable model project first. Vedock will not load weights or start training while this form is being configured.</p>
+  </div>
+</header>
+
+<div class="stage-rail guided-rail" data-wizard-rail><span>1 Objective</span><span>2 Workflow</span><span>3 Starting point</span><span>4 Dataset</span><span>5 Controls</span><span>6 Save task</span></div>
+
+<form method="post" class="studio-form guided-wizard" data-model-studio data-wizard>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <section class="panel" data-wizard-step>
+    <div class="panel-head"><div><span class="section-index">01 / TASK</span><h2>What are you building?</h2></div></div>
+    <div class="task-grid">
+      {% for task in task_options %}
+        <label class="task-card{% if not task.available %} disabled{% endif %}">
+          <input type="radio" name="task_type" value="{{ task.id }}" {% if task.id == requested_task %}checked{% endif %} {% if not task.available %}disabled{% else %}onchange="window.location.href='{{ url_for('web.create_model') }}?task=' + encodeURIComponent(this.value)"{% endif %}>
+          <span>{{ task.name[:3] | upper }}</span><b>{{ task.name }}</b>
+          <small>{{ task.description }} {{ 'Available now.' if task.available else 'Runtime adapter not installed yet.' }}</small>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="help-definition"><strong>Model type is an ML objective, not a personality or use case.</strong> A GPT-style decoder is a causal language model whether it writes code, dialogue, or fiction. The selected objective determines compatible architectures, losses, dataset schemas, and runtime parameters.</div>
+  </section>
+
+  <section class="panel" data-wizard-step>
+    <div class="panel-head"><div><span class="section-index">02 / WORKFLOW</span><h2>How should the model be created?</h2></div></div>
+    <div class="task-grid">
+      {% for mode in build_modes %}
+        <label class="task-card">
+          <input type="radio" name="build_mode" value="{{ mode.id }}" {% if mode.id == request.form.get('build_mode', 'scratch' if requested_task != 'causal_lm' else 'fine_tune') %}checked{% endif %}>
+          <span>{{ loop.index }}</span><b>{{ mode.name }}</b><small>{{ mode.description }}</small>
+        </label>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel" data-source-section data-wizard-step>
+    <div class="panel-head"><div><span class="section-index">03 / MODEL SOURCE</span><h2>Select or load the starting point</h2></div></div>
+    {% if requested_task == 'causal_lm' %}
+    <div class="form-grid three">
+      <label>Source type
+        <select name="source_type" data-model-source>
+          {% set selected_source = request.form.get('source_type', 'existing') %}
+          <option value="existing" {% if selected_source == 'existing' %}selected{% endif %}>Registered Vedock / StoryMaker model</option>
+          <option value="catalog" {% if selected_source == 'catalog' %}selected{% endif %}>GPT-2 model catalog</option>
+          <option value="huggingface" {% if selected_source == 'huggingface' %}selected{% endif %}>Hugging Face repository</option>
+          <option value="local" {% if selected_source == 'local' %}selected{% endif %}>Local model directory</option>
+          <option value="checkpoint" {% if selected_source == 'checkpoint' %}selected{% endif %}>Existing checkpoint directory</option>
+          <option value="scratch" {% if selected_source == 'scratch' %}selected{% endif %}>New scratch architecture</option>
+        </select>
+      </label>
+      <label>Base display name<input name="base_model_name" maxlength="160" placeholder="Optional friendly name"></label>
+      <label>Project name<input name="project_name" maxlength="160" value="{{ request.form.get('project_name', 'My model project') }}" required></label>
+    </div>
+
+    <div data-source-fields="existing" class="form-grid">
+      <label>Registered model
+        <select name="base_model_id">
+          {% for model in models %}<option value="{{ model.id }}" {% if selected_model and selected_model.id == model.id %}selected{% endif %}>{{ model.name }} - {{ model.source_type | replace('_',' ') }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div data-source-fields="catalog" class="form-grid" hidden>
+      <label>Pretrained model
+        <select name="catalog_model">
+          {% for item in model_catalog %}<option value="{{ item.id }}">{{ item.name }} - {{ item.parameters }} - {{ item.note }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Repository revision<input name="revision" value="main" placeholder="main, a tag, or commit hash"><small><code>main</code> means the repository's current default branch. Pin a tag or commit hash when you need a reproducible, unchanging base.</small></label>
+    </div>
+
+    <div data-source-fields="huggingface" class="form-grid" hidden>
+      <label>Repository<input name="repository" placeholder="gpt2-medium or owner/model-name"></label>
+      <label>Repository revision<input name="revision" value="main" placeholder="main, a tag, or commit hash"><small><code>main</code> means the repository's current default branch. A tag or commit hash makes the project reproducible.</small></label>
+      <p class="callout warning">The model is registered now and downloaded lazily only when used. Set <code>OFFLINE_MODE=false</code> if it is not already cached.</p>
+    </div>
+
+    <div data-source-fields="local" class="form-grid" hidden>
+      <label>Local model directory<input name="local_path" placeholder="D:\models\my-model"></label>
+      <p class="callout">Vedock validates the configuration, tokenizer, and weight files. The source directory stays read-only.</p>
+    </div>
+    <div data-source-fields="checkpoint" class="form-grid" hidden>
+      <label>Checkpoint directory<input name="local_path" placeholder="D:\models\checkpoint-1000"></label>
+      <p class="callout">The checkpoint is registered as a read-only source. New outputs always go under Vedock storage.</p>
+    </div>
+
+    <div data-source-fields="scratch" class="form-grid" hidden>
+      <label>Architecture family<select name="architecture_family"><option value="gpt2">GPT-2 - decoder-only Transformer</option></select><small>This determines the actual model classes and architecture fields. Only the production-owned GPT-2 factory is installed today.</small></label>
+      <label>Architecture preset
+        <select name="scratch_preset" data-scratch-preset>
+          {% for key,item in scratch_presets.items() %}<option value="{{ key }}">{{ item.name }} - {{ item.n_layer }} layers / {{ item.n_head }} heads / {{ item.n_embd }} width</option>{% endfor %}
+        </select>
+      </label>
+      <label>Tokenizer source<input name="tokenizer_repository" value="gpt2" placeholder="gpt2"><small>Scratch initializes new weights, but still needs a vocabulary and tokenization algorithm. This can be a local tokenizer or repository identifier.</small></label>
+      <div class="form-grid four" data-custom-architecture hidden>
+        <label>Layers<input type="number" name="n_layer" value="6" step="any"></label>
+        <label>Heads<input type="number" name="n_head" value="8" step="any"></label>
+        <label>Embedding width<input type="number" name="n_embd" value="512" step="any"></label>
+        <label>Context length<input type="number" name="n_positions" value="1024" step="any"></label>
+      </div>
+      <p class="callout warning">Scratch creates random weights from the selected GPT-2 architecture. It will not generate meaningful text until trained.</p>
+    </div>
+    {% else %}
+    <input type="hidden" name="source_type" value="fast">
+    <input type="hidden" name="build_mode" value="scratch">
+    <div class="form-grid three">
+      <label>Runtime definition<input value="{{ {'pattern_sequence':'N-gram transition model','image_classification':'Fast image classifier','tabular_regression':'Safe numeric predictor','tabular_classification':'Safe category predictor'}.get(requested_task, 'Fast model') }}" disabled><small>This creates a lightweight model definition. Fitting starts only after you save, review, and manually press Start training.</small></label>
+      <label>Base display name<input name="base_model_name" maxlength="160" value="{{ request.form.get('base_model_name', {'pattern_sequence':'Pattern sequence model','image_classification':'Fast image classifier','tabular_regression':'Numeric predictor','tabular_classification':'Category predictor'}.get(requested_task, 'Fast model')) }}"></label>
+      <label>Project name<input name="project_name" maxlength="160" value="{{ request.form.get('project_name', 'My fast model project') }}" required></label>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="panel" data-training-section data-wizard-step>
+    <div class="panel-head"><div><span class="section-index">04 / DATA AND METHOD</span><h2>Choose validated data and weight updates</h2></div></div>
+    <div class="form-grid three">
+      <label>Dataset version
+        <select name="dataset_version_id" data-dataset-select>
+          <option value="">Choose a validated version</option>
+          {% for version in dataset_versions %}<option value="{{ version.id }}">{{ version.raw_dataset.name }} - v{{ version.version_number }} - {{ version.row_count }} rows - {{ version.validation_status }}</option>{% endfor %}
+        </select>
+        <small><a href="{{ url_for('web.datasets') }}">Prepare another dataset</a></small>
+      </label>
+      <label>Output model name<input name="output_model_name" value="{{ request.form.get('output_model_name', 'my-model') }}" maxlength="160" required></label>
+      {% if requested_task == 'causal_lm' %}<label data-finetune-method>Fine-tuning method
+        <select name="training_method"><option value="lora">LoRA - recommended</option><option value="full">Full fine-tuning - high memory</option></select>
+      </label>{% endif %}
+    </div>
+  </section>
+
+  <section class="panel" data-parameter-section data-wizard-step>
+    <div class="panel-head"><div><span class="section-index">05 / PARAMETERS</span><h2>Simple presets with complete runtime controls</h2></div><label class="compact-switch"><input type="checkbox" data-advanced-toggle-checkbox><span>Advanced parameters</span></label></div>
+    <div class="preset-row"><button type="button" data-preset="fast">Fast</button><button type="button" class="active" data-preset="balanced">Balanced</button><button type="button" data-preset="quality">High Quality</button><button type="button" data-preset="memory">Low Memory</button><button type="button" data-preset="custom">Custom</button></div>
+    {% include 'web/_parameters.html' %}
+  </section>
+
+  <section class="review-bar" data-wizard-step>
+    <div><span class="section-index">SAVE BEFORE EXECUTION</span><p>This creates a draft and review page. It does not start training.</p></div>
+    <label class="check"><input type="checkbox" name="save_recipe" checked><span>Save recipe</span></label>
+    <button class="button large" type="submit" data-studio-submit>Save project and review</button>
+  </section>
+  <nav class="wizard-navigation"><button class="button ghost" type="button" data-wizard-prev>Back</button><span data-wizard-label></span><button class="button" type="button" data-wizard-next>Continue</button></nav>
+</form>
+
+{% if projects %}
+<section class="panel">
+  <div class="panel-head"><div><span class="section-index">SAVED PROJECTS</span><h2>Continue from a draft</h2></div></div>
+  <div class="job-list">
+    {% for project in projects %}<a href="{{ url_for('web.project_details', project_id=project.id) }}"><span class="status {{ project.status }}">{{ project.status }}</span><span><strong>{{ project.name }}</strong><small>{{ project.task_type | replace('_',' ') | title }} - {{ project.training_method | replace('_',' ') }}</small></span><b>View</b></a>{% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

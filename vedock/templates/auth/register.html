@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-copy"><span class="eyebrow"><span></span> Two-minute setup</span><h1>Your AI studio.<br><em>Your controls.</em></h1><p>Start locally with StoryMaker, prepare a dataset, and produce a traceable model version.</p></div>
+  <form class="auth-card" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div><span class="section-index">LOCAL ACCOUNT</span><h2>Create workspace</h2><p>No billing. No social profile.</p></div>
+    <label>Username<input name="username" minlength="3" maxlength="64" autocomplete="username" required autofocus></label>
+    <label>Email<input type="email" name="email" maxlength="255" autocomplete="email" required></label>
+    <label>Password<input type="password" name="password" minlength="8" autocomplete="new-password" required></label>
+    <label>Confirm password<input type="password" name="password_confirmation" minlength="8" autocomplete="new-password" required></label>
+    <button class="button full" type="submit">Create workspace <span>→</span></button>
+    <p class="form-foot">Already registered? <a href="{{ url_for('auth.login') }}">Log in</a></p>
+  </form>
+</section>
+{% endblock %}

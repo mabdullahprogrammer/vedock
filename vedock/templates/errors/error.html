@@ -1,0 +1,2 @@
+{% extends "base.html" %}{% block title %}Error {{ status }}{% endblock %}{% block page_name %}Error{% endblock %}
+{% block content %}<section class="error-page"><span>{{ status }}</span><h1>{{ branding.name }} could not complete that request.</h1><p>{{ message }}</p><a class="button" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('main.landing') }}">Return safely →</a></section>{% endblock %}

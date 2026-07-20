@@ -1,0 +1,22 @@
+{% for group, fields in schema_groups %}
+<fieldset class="parameter-group">
+  <legend><span>{{ loop.index }}</span>{{ group | replace('_',' ') | title }}</legend>
+  <div class="form-grid">
+  {% for field in fields %}
+    <label class="parameter-field {% if field.advanced %}advanced-field{% endif %}" data-advanced="{{ 'true' if field.advanced else 'false' }}" {% if field.depends_on %}data-depends='{{ field.depends_on | tojson }}'{% endif %}>
+      <span>{{ field.label }}{% if field.required %}<b>*</b>{% endif %}{% if field.advanced %}<small>ADV</small>{% endif %}<button type="button" class="parameter-help" title="{{ field.description }}">?</button></span>
+      {% if field.type == 'boolean' %}
+      <span class="switch"><input type="checkbox" name="{{ field.name }}" {% if field.default %}checked{% endif %}><i></i><em>{{ field.description }}</em></span>
+      {% elif field.choices %}
+      <select name="{{ field.name }}">{% for choice in field.choices %}<option value="{{ choice }}" {% if choice == field.default %}selected{% endif %}>{{ choice | string | replace('_',' ') | title }}</option>{% endfor %}</select><small>{{ field.description }}</small>
+      {% elif field.type == 'string' and field.name in ['system_prompt', 'output_pattern'] %}
+      <textarea name="{{ field.name }}" rows="3" placeholder="Optional">{{ field.default }}</textarea><small>{{ field.description }}</small>
+      {% else %}
+      <input name="{{ field.name }}" value="{{ field.default | join(', ') if field.type == 'list' else field.default }}" type="{{ 'number' if field.type in ['integer','float'] else 'text' }}" {% if field.type in ['integer','float'] %}step="any"{% endif %} {% if field.required %}required{% endif %}><small>{{ field.description }}{% if field.minimum is not none or field.maximum is not none %} Suggested range: {{ field.minimum if field.minimum is not none else 'unbounded' }} to {{ field.maximum if field.maximum is not none else 'unbounded' }}. You may enter another value; the local runtime makes the final compatibility decision.{% endif %}</small>
+      {% endif %}
+      {% if field.hardware_warning %}<small class="warning-text">{{ field.hardware_warning }}</small>{% endif %}
+    </label>
+  {% endfor %}
+  </div>
+</fieldset>
+{% endfor %}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Chats{% endblock %}{% block page_name %}Chats{% endblock %}
+{% block content %}
+<header class="page-header"><div><span class="section-index">SAVED CHATS</span><h1>Continue where you stopped.</h1><p>Each chat keeps its model version, messages, and latest runtime parameters.</p></div><a class="button" href="{{ url_for('web.playground') }}">New chat +</a></header>
+<section class="conversation-grid">
+  {% for conversation in conversations %}<a class="conversation-card" href="{{ url_for('web.playground', slug=conversation.model_version.model.slug, conversation=conversation.id) }}"><span class="model-glyph">{{ conversation.messages | length }}</span><div><span class="section-index">{{ conversation.model_version.model.name }}</span><h2>{{ conversation.title }}</h2><p>{{ conversation.messages[-1].content[:180] if conversation.messages else 'No messages' }}{% if conversation.messages and conversation.messages[-1].content | length > 180 %}...{% endif %}</p><small>Updated {{ conversation.updated_at }}</small></div><b>Open</b></a>{% else %}<div class="empty">Start a chat with any runnable model.</div>{% endfor %}
+</section>
+{% endblock %}

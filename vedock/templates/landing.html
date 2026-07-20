@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ branding.tagline }}{% endblock %}
+{% block content %}
+<section class="new-landing-hero">
+  <div class="landing-copy">
+    <span class="landing-kicker">AI CREATION, WITHOUT THE CLI WALL</span>
+    <img class="landing-logo" src="{{ url_for('main.brand_logo') }}" alt="{{ branding.name }}">
+    <h1>Build an AI<br><em>you can actually control.</em></h1>
+    <p>Start with a model, prepare data visually, choose every supported setting, then run it locally or publish it when it is ready.</p>
+    <div class="hero-actions clean-actions">
+      <a class="button large" href="{{ url_for('auth.register') }}">Start building</a>
+      <a class="button ghost large" href="{{ url_for('auth.login') }}">Explore models</a>
+    </div>
+    <div class="hero-proof clean-proof"><span>Private by default</span><span>Training stays on your device</span><span>Every setting explained</span></div>
+  </div>
+  <aside class="landing-preview" aria-label="Vedock workflow preview">
+    <div class="preview-top"><span>MODEL STUDIO</span><i>● Ready</i></div>
+    <div class="preview-model"><img src="{{ url_for('main.brand_logo') }}" alt=""><div><small>CAUSAL LANGUAGE MODEL</small><strong>My assistant</strong><span>GPT-2 medium · LoRA</span></div></div>
+    <div class="preview-line"><span>Dataset</span><b>clean-prompts v2</b><small>1,248 examples</small></div>
+    <div class="preview-line"><span>Method</span><b>LoRA</b><small>low-memory adapter</small></div>
+    <div class="preview-line"><span>Output</span><b>Model version 1</b><small>ready to test</small></div>
+    <div class="preview-cta">Review configuration <b>→</b></div>
+  </aside>
+</section>
+
+<section class="landing-steps" id="workflow">
+  <div><span class="section-index">A CLEAR PATH</span><h2>One calm workflow from idea to model.</h2></div>
+  <ol>
+    <li><b>01</b><strong>Choose a starting point</strong><span>Use a local model, GPT-2, a repository, checkpoint, or a new architecture.</span></li>
+    <li><b>02</b><strong>Make data training-ready</strong><span>Import, inspect, clean, map fields, preview, validate, and save immutable versions.</span></li>
+    <li><b>03</b><strong>Configure with confidence</strong><span>Use a preset or open the advanced controls with plain-language descriptions.</span></li>
+    <li><b>04</b><strong>Run on your own hardware</strong><span>Create on the web; explicitly claim and execute the task from your Vedock app.</span></li>
+  </ol>
+</section>
+
+{% if featured_models %}
+<section class="landing-models" aria-label="Featured models">
+  <header><div><span class="section-index">MODEL DIRECTORY</span><h2>Models ready to try or remix.</h2></div><a href="{{ url_for('auth.login') }}">Open model directory →</a></header>
+  <div class="landing-model-grid">
+    {% for model in featured_models[:4] %}
+      <a class="landing-model" href="{{ url_for('auth.login', next=url_for('web.model_details', slug=model.slug)) }}">
+        <img src="{{ url_for('web.model_cover', slug=model.slug) }}" alt="">
+        <div><small>{{ model.task_type | replace('_',' ') }}</small><strong>{{ model.name }}</strong><span>by {{ model.owner.username if model.owner else 'Vedock' }} · {{ fork_counts.get(model.id, 0) }} forks</span></div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

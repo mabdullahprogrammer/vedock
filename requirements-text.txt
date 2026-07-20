@@ -1,0 +1,6 @@
+torch>=2.2,<3
+transformers>=4.40,<5
+datasets>=2.18,<5
+safetensors>=0.4,<1
+accelerate>=0.26,<2
+peft>=0.12,<1
