@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import inspect
+
 from vedock.extensions import db
 from vedock.models import Job, ModelProject, ModelRecord, ModelVersion, User
 from vedock.runtimes import get_runtime
 
 
 def test_desktop_page_renders_complete_html():
-    from vedock_cli.desktop import _page
+    from vedock_cli.desktop import DesktopBridge, _page
 
     page = _page()
     assert "Run on this computer" in page
@@ -14,6 +16,10 @@ def test_desktop_page_renders_complete_html():
     assert "vedock.ecorims.com" in page
     assert "api.dispatch(name,args)" in page
     assert "Connecting securely to this device" in page
+    # PyWebView generates JavaScript formal parameters from this signature.
+    # Naming one of them `arguments` shadows JavaScript's built-in arguments
+    # object and makes dispatch receive no action at runtime.
+    assert "arguments" not in inspect.signature(DesktopBridge.dispatch).parameters
 
 
 def test_installer_folder_result_and_html_use_a_real_input_name():

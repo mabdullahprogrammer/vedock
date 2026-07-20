@@ -24,12 +24,18 @@ class DesktopBridge:
         self.client.api_url = api_url.rstrip("/")
         self.processes: dict[str, subprocess.Popen[Any]] = {}
 
-    def dispatch(self, action: str, arguments: list[Any] | None = None) -> Any:
-        """Stable WebView entry point used after the native bridge is ready."""
+    def dispatch(self, action: str, values: list[Any] | None = None) -> Any:
+        """Stable WebView entry point used after the native bridge is ready.
+
+        ``arguments`` must not be used as a parameter name here. PyWebView
+        copies Python parameter names into a generated JavaScript function,
+        where ``arguments`` would shadow JavaScript's built-in arguments object
+        and cause every bridge call to arrive without parameters.
+        """
         if action not in self._ACTIONS:
             raise ValueError(f"Unknown desktop action: {action}")
         target = getattr(self, action)
-        return target(*(list(arguments or [])))
+        return target(*(list(values or [])))
 
     def bootstrap(self) -> dict[str, Any]:
         from vedock_cli.device import local_device_report

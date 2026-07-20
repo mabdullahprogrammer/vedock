@@ -51,7 +51,7 @@ class Config:
     NODE_MODE = os.getenv("NODE_MODE", "hosted_inference").strip().lower()
     NODE_NAME = os.getenv("NODE_NAME", os.environ.get("COMPUTERNAME", "Vedock node"))
     CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "").strip()
-    MIN_CONNECTED_CLIENT_VERSION = os.getenv("MIN_CONNECTED_CLIENT_VERSION", "2026.07.21.2").strip()
+    MIN_CONNECTED_CLIENT_VERSION = os.getenv("MIN_CONNECTED_CLIENT_VERSION", "2026.07.21.3").strip()
 
     SECRET_KEY = os.getenv("SECRET_KEY", "vedock-local-dev-change-me")
     SQLALCHEMY_DATABASE_URI = os.getenv(
