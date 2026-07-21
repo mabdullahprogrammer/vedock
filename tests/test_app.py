@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
+
+from flask import Response
 
 from vedock.extensions import db
 from vedock.models import Job, ModelProject, ModelRecord, ModelVersion, User
@@ -107,6 +110,39 @@ def test_branding_is_environment_driven(client):
     assert response.status_code == 200
     assert b"Vedock Test" in response.data
     assert b"Test all controls." in response.data
+
+
+def test_favicon_and_unknown_routes_do_not_raise_500(registered_client):
+    favicon = registered_client.get("/favicon.ico")
+    assert favicon.status_code in {200, 204}
+    missing = registered_client.get("/this-route-does-not-exist")
+    assert missing.status_code == 404
+    assert b"requested URL was not found" in missing.data
+
+
+def test_installer_download_falls_back_when_current_file_disappears(client, app, monkeypatch, tmp_path):
+    from vedock.web import routes
+
+    distribution = tmp_path / "distribution"
+    distribution.mkdir()
+    current = distribution / "VedockInstaller-current.exe"
+    stable = distribution / "VedockInstaller.exe"
+    current.write_bytes(b"current")
+    stable.write_bytes(b"stable")
+    app.config["DISTRIBUTION_ROOT"] = distribution
+    requested: list[str] = []
+
+    def fake_send_file(path, **kwargs):
+        requested.append(Path(path).name)
+        if Path(path) == current:
+            raise OSError(22, "quarantined during open")
+        return Response(Path(path).read_bytes(), mimetype=kwargs.get("mimetype"))
+
+    monkeypatch.setattr(routes, "send_file", fake_send_file)
+    response = client.get("/downloads/vedock-installer.exe")
+    assert response.status_code == 200
+    assert response.data == b"stable"
+    assert requested == [current.name, stable.name]
 
 
 def test_register_login_and_protected_pages(registered_client):

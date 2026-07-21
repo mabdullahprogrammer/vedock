@@ -1121,11 +1121,27 @@ def installer_download():
     # A running Windows executable locks its own filename. Builds are first
     # published to the unlocked current slot so web downloads can be updated
     # without killing an installer window the user may still be viewing.
-    current = root / "VedockInstaller-current.exe"
-    path = current if current.is_file() else root / "VedockInstaller.exe"
-    if not path.is_file():
-        abort(404, description="The Windows installer has not been built on this node.")
-    return send_file(path, as_attachment=True, download_name=f"{current_app.config['APP_SHORT_NAME']}-Installer.exe", mimetype="application/vnd.microsoft.portable-executable")
+    candidates = (root / "VedockInstaller-current.exe", root / "VedockInstaller.exe")
+    unavailable: list[str] = []
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            return send_file(
+                path,
+                as_attachment=True,
+                download_name=f"{current_app.config['APP_SHORT_NAME']}-Installer.exe",
+                mimetype="application/vnd.microsoft.portable-executable",
+                conditional=True,
+            )
+        except OSError as exc:
+            # Security software can quarantine a newly built executable between
+            # is_file() and open(). Try the stable slot and never expose a 500.
+            unavailable.append(f"{path.name}: {exc}")
+            current_app.logger.warning("Installer candidate became unavailable: %s", path)
+    if unavailable:
+        abort(503, description="The Windows installer is temporarily unavailable while its release file is being verified.")
+    abort(404, description="The Windows installer has not been built on this node.")
 
 
 @bp.get("/downloads/vedock-node.zip")

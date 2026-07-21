@@ -98,6 +98,7 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
     @app.errorhandler(413)
     @app.errorhandler(422)
     @app.errorhandler(500)
+    @app.errorhandler(503)
     def handle_error(error: Any):
         status = getattr(error, "code", 500) or 500
         message = getattr(error, "description", "An unexpected error occurred.")

@@ -19,8 +19,8 @@
     <nav class="nav-list" aria-label="Primary navigation">
       <a href="{{ url_for('main.dashboard') }}" class="{% if request.endpoint == 'main.dashboard' %}active{% endif %}"><span>01</span> Dashboard</a>
       <a href="{{ url_for('web.create_model') }}" class="{% if request.endpoint == 'web.create_model' %}active{% endif %}"><span>02</span> Create Model</a>
-      <a href="{{ url_for('web.datasets') }}" class="{% if 'dataset' in request.endpoint %}active{% endif %}"><span>03</span> Datasets</a>
-      <a href="{{ url_for('web.jobs') }}" class="{% if 'job' in request.endpoint %}active{% endif %}"><span>04</span> Training Jobs</a>
+      <a href="{{ url_for('web.datasets') }}" class="{% if 'dataset' in (request.endpoint or '') %}active{% endif %}"><span>03</span> Datasets</a>
+      <a href="{{ url_for('web.jobs') }}" class="{% if 'job' in (request.endpoint or '') %}active{% endif %}"><span>04</span> Training Jobs</a>
       <a href="{{ url_for('web.models') }}" class="{% if request.endpoint in ['web.models','web.model_details','web.playground','web.playground_stream'] %}active{% endif %}"><span>05</span> Explore Models</a>
       <a href="{{ url_for('web.merge_models') }}" class="{% if request.endpoint == 'web.merge_models' %}active{% endif %}"><span>06</span> Merge Models</a>
     </nav>

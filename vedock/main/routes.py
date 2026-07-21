@@ -25,6 +25,15 @@ def brand_logo():
     return ("", 404)
 
 
+@bp.get("/favicon.ico")
+def favicon():
+    """Serve a real icon so browsers do not turn a harmless 404 into log noise."""
+    icon = Path(__file__).resolve().parents[2] / "vedock_cli" / "assets" / "logo.ico"
+    if icon.is_file():
+        return send_file(icon, mimetype="image/vnd.microsoft.icon", conditional=True, max_age=86400)
+    return ("", 204)
+
+
 @bp.get("/")
 def landing():
     # The public root is Vedock's product page. Catalog bases, legacy imports,
