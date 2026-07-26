@@ -28,6 +28,7 @@ def app(tmp_path: Path):
             "APP_SHORT_NAME": "VTest",
             "CLI_NAME": "vtest",
             "APP_TAGLINE": "Test all controls.",
+            "ADMIN_USERNAMES": ("tester",),
         }
     )
     yield application

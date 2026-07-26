@@ -28,6 +28,7 @@
       <a href="{{ url_for('web.developer') }}"><span>↗</span> Developer / CLI</a>
       <a href="{{ url_for('web.system') }}"><span>◎</span> System</a>
       <a href="{{ url_for('web.settings') }}"><span>·</span> Settings</a>
+      {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{% if (request.endpoint or '').startswith('admin.') %}active{% endif %}"><span>OP</span> Admin / Logs</a>{% endif %}
     </nav>
     <div class="sidebar-profile">
       <span class="avatar">{{ current_user.username[0] | upper }}</span>

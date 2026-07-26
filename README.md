@@ -106,6 +106,16 @@ vedock jobs run JOB_ID
 
 Vedock checks the required runtime before claiming the task. Training starts only after the owner explicitly runs it, compute stays on that connected computer, and publishing the finalized inference artifact is optional.
 
+## Admin and hackathon operations
+
+Set a comma-separated administrator allowlist in `.env`:
+
+```env
+ADMIN_USERNAMES=your_username
+```
+
+Administrators receive an **Admin / Logs** link and can open `/admin` to inspect account counts, user accounts, recent jobs and job events, structured application errors, connected-device counts, storage capacity, and the rotating server log. The operations interface intentionally excludes passwords, API-token values, request bodies, private dataset contents, and connected-device paths.
+
 ## CLI
 
 ```text

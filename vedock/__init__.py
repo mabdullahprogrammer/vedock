@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,9 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
             app.config.from_object(config_object)
 
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    from .services.operations import configure_operations_logging
+
+    configure_operations_logging(app)
     db.init_app(app)
     login_manager.init_app(app)
 
@@ -45,6 +49,7 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
         except (TypeError, ValueError):
             return None
 
+    from .admin.routes import bp as admin_bp
     from .auth.routes import bp as auth_bp
     from .main.routes import bp as main_bp
     from .web.routes import bp as web_bp
@@ -52,8 +57,14 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(admin_bp)
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp, url_prefix="/api/v1")
+
+    @app.before_request
+    def expose_request_context() -> None:
+        g.request_id = secrets.token_hex(6)
+        g.request_started_at = time.monotonic()
 
     @app.before_request
     def csrf_protect() -> None:
@@ -71,12 +82,14 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
         if not expected or not received or not secrets.compare_digest(expected, received):
             abort(400, description="The form expired or its security token is invalid. Please retry.")
 
-    @app.before_request
-    def expose_request_id() -> None:
-        g.request_id = secrets.token_hex(6)
+    from .services.operations import log_request
+
+    app.after_request(log_request)
 
     @app.context_processor
     def inject_branding() -> dict[str, Any]:
+        from .admin.routes import is_admin_user
+
         token = session.get("csrf_token")
         if not token:
             token = secrets.token_urlsafe(24)
@@ -89,6 +102,7 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
                 "tagline": app.config["APP_TAGLINE"],
             },
             "csrf_token": token,
+            "is_admin": is_admin_user(current_user),
         }
 
     @app.errorhandler(400)
@@ -100,8 +114,14 @@ def create_app(config_object: Any = None, *, register_legacy: bool = True) -> Fl
     @app.errorhandler(500)
     @app.errorhandler(503)
     def handle_error(error: Any):
+        from .services.operations import record_error_event
+
         status = getattr(error, "code", 500) or 500
         message = getattr(error, "description", "An unexpected error occurred.")
+        try:
+            record_error_event(error, status)
+        except Exception:
+            app.logger.exception("Unable to record an application error event")
         if request.path.startswith("/api/"):
             return jsonify({"ok": False, "error": {"code": status, "message": message}, "request_id": g.get("request_id")}), status
         return render_template("errors/error.html", status=status, message=message), status

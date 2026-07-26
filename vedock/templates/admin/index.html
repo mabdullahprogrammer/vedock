@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Operations{% endblock %}
+{% block page_name %}Admin / Operations{% endblock %}
+{% block content %}
+<section class="admin-shell">
+  <header class="admin-hero">
+    <div>
+      <span class="section-index">HACKATHON CONTROL ROOM</span>
+      <h1>Vedock operations</h1>
+      <p>Accounts, jobs, errors, and bounded logs in one protected workspace.</p>
+    </div>
+    <a class="button ghost" href="{{ url_for('admin.index', tab=tab) }}">Refresh</a>
+  </header>
+
+  <nav class="admin-tabs" aria-label="Operations sections">
+    {% for key, label in [('overview','Overview'),('users','User accounts'),('jobs','Jobs'),('errors','Errors'),('logs','Server logs')] %}
+    <a href="{{ url_for('admin.index', tab=key) }}" class="{% if tab == key %}active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if tab == 'overview' %}
+  <section class="admin-metrics">
+    <article><small>Accounts</small><strong>{{ counts.users }}</strong></article>
+    <article><small>Models</small><strong>{{ counts.models }}</strong></article>
+    <article><small>Datasets</small><strong>{{ counts.datasets }}</strong></article>
+    <article><small>Jobs</small><strong>{{ counts.jobs }}</strong></article>
+    <article class="{% if counts.failed_jobs %}attention{% endif %}"><small>Failed jobs</small><strong>{{ counts.failed_jobs }}</strong></article>
+    <article class="{% if counts.recent_errors %}attention{% endif %}"><small>Recorded errors</small><strong>{{ counts.recent_errors }}</strong></article>
+  </section>
+  <section class="admin-grid">
+    <article class="admin-panel">
+      <header><div><span class="section-index">RECENT ACTIVITY</span><h2>Latest jobs</h2></div><a href="{{ url_for('admin.index', tab='jobs') }}">View all</a></header>
+      {% for row in job_rows[:8] %}
+      <div class="admin-activity-row">
+        <span><b>{{ row.job.job_type | replace('_',' ') }}</b><small>{{ row.owner.username if row.owner else 'Deleted account' }} · {{ row.job.created_at }}</small></span>
+        <i class="status-badge {{ row.job.status }}">{{ row.job.status | replace('_',' ') }}</i>
+      </div>
+      {% else %}<p class="empty-note">No jobs have been created.</p>{% endfor %}
+    </article>
+    <article class="admin-panel">
+      <header><div><span class="section-index">SYSTEM</span><h2>Control plane</h2></div></header>
+      <dl class="admin-facts">
+        <div><dt>Node mode</dt><dd>{{ config.NODE_MODE }}</dd></div>
+        <div><dt>Connected devices</dt><dd>{{ counts.connected_devices }}</dd></div>
+        <div><dt>Storage free</dt><dd>{{ '%.1f' | format(disk.free / 1073741824) }} GiB</dd></div>
+        <div><dt>Storage capacity</dt><dd>{{ '%.1f' | format(disk.total / 1073741824) }} GiB</dd></div>
+      </dl>
+    </article>
+  </section>
+  {% elif tab == 'users' %}
+  <section class="admin-panel">
+    <header><div><span class="section-index">IDENTITIES</span><h2>User accounts</h2><p>No passwords or token values are exposed.</p></div></header>
+    <div class="admin-table-wrap"><table class="admin-table">
+      <thead><tr><th>Account</th><th>Created</th><th>Models</th><th>Datasets</th><th>Jobs</th><th>Devices</th><th>API tokens</th><th>Role</th></tr></thead>
+      <tbody>{% for row in user_rows %}<tr>
+        <td><b>{{ row.user.username }}</b><small>{{ row.user.email }}</small></td>
+        <td>{{ row.user.created_at }}</td><td>{{ row.models }}</td><td>{{ row.datasets }}</td><td>{{ row.jobs }}</td><td>{{ row.devices }}</td><td>{{ row.tokens }}</td>
+        <td><i class="status-badge {% if row.admin %}completed{% endif %}">{{ 'administrator' if row.admin else 'member' }}</i></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% elif tab == 'jobs' %}
+  <section class="admin-panel">
+    <header><div><span class="section-index">EXECUTION</span><h2>Training and processing jobs</h2></div></header>
+    <div class="admin-table-wrap"><table class="admin-table">
+      <thead><tr><th>Job</th><th>Owner</th><th>Status</th><th>Stage</th><th>Progress</th><th>Latest event</th><th>Created</th></tr></thead>
+      <tbody>{% for row in job_rows %}<tr>
+        <td><code>{{ row.job.id[:8] }}</code><small>{{ row.job.job_type | replace('_',' ') }}</small></td>
+        <td>{{ row.owner.username if row.owner else 'Deleted account' }}</td>
+        <td><i class="status-badge {{ row.job.status }}">{{ row.job.status | replace('_',' ') }}</i></td>
+        <td>{{ row.job.current_stage | replace('_',' ') }}</td><td>{{ row.job.progress }}%</td>
+        <td>{{ (row.last_log.message if row.last_log else row.job.error_message) or 'No log entries' }}</td><td>{{ row.job.created_at }}</td>
+      </tr>{% else %}<tr><td colspan="7">No jobs recorded.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% elif tab == 'errors' %}
+  <section class="admin-panel">
+    <header><div><span class="section-index">DIAGNOSTICS</span><h2>Application errors</h2><p>Request bodies, passwords, API tokens, and private file paths are excluded.</p></div></header>
+    <div class="admin-error-list">
+      {% for error in errors %}
+      <article>
+        <header><i class="status-badge {% if error.status >= 500 %}failed{% else %}cancelled{% endif %}">HTTP {{ error.status }}</i><b>{{ error.error_type }}</b><code>{{ error.request_id }}</code><time>{{ error.time }}</time></header>
+        <p><strong>{{ error.method }} {{ error.path }}</strong> — {{ error.message }}</p>
+        {% if error.traceback %}<details><summary>Technical traceback</summary><pre>{{ error.traceback }}</pre></details>{% endif %}
+      </article>
+      {% else %}<p class="empty-note">No errors have been recorded.</p>{% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <section class="admin-panel">
+    <header><div><span class="section-index">BOUNDED FILE LOG</span><h2>Server log</h2><p>Newest 500 lines. The file rotates automatically.</p></div></header>
+    <pre class="admin-log">{{ application_log }}</pre>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

@@ -32,6 +32,10 @@ def _env_path(name: str, default: str | Path) -> Path:
     return path.resolve()
 
 
+def _env_csv(name: str, default: str = "") -> tuple[str, ...]:
+    return tuple(item.strip().lower() for item in os.getenv(name, default).split(",") if item.strip())
+
+
 def _default_storymaker_root() -> Path:
     requested = Path(r"D:\LLM\StoryMaker")
     discovered = Path(r"D:\LLM\new-llm\LLM-2025\StoryMaker")
@@ -52,6 +56,7 @@ class Config:
     NODE_NAME = os.getenv("NODE_NAME", os.environ.get("COMPUTERNAME", "Vedock node"))
     CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "").strip()
     MIN_CONNECTED_CLIENT_VERSION = os.getenv("MIN_CONNECTED_CLIENT_VERSION", "2026.07.21.3").strip()
+    ADMIN_USERNAMES = _env_csv("ADMIN_USERNAMES")
 
     SECRET_KEY = os.getenv("SECRET_KEY", "vedock-local-dev-change-me")
     SQLALCHEMY_DATABASE_URI = os.getenv(
