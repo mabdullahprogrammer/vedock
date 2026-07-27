@@ -5,7 +5,6 @@ import logging
 import threading
 import traceback
 from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,51 @@ from flask_login import current_user
 
 
 _error_lock = threading.Lock()
+_log_lock = threading.Lock()
+_LOG_MAX_BYTES = 2 * 1024 * 1024
+_LOG_BACKUPS = 3
+
+
+class ResilientOperationsHandler(logging.Handler):
+    """Append one record at a time so Windows never holds the log file open."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+        self._vedock_operations_handler = True
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            encoded = (self.format(record) + "\n").encode("utf-8", errors="replace")
+            with _log_lock:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._rotate_if_needed(len(encoded))
+                with self.path.open("ab") as stream:
+                    stream.write(encoded)
+        except (OSError, ValueError):
+            # Operational logging must never break or flood a live request when a
+            # removable/network-backed storage volume is briefly unavailable.
+            return
+
+    def _rotate_if_needed(self, incoming_size: int) -> None:
+        try:
+            current_size = self.path.stat().st_size
+        except FileNotFoundError:
+            return
+        if current_size + incoming_size <= _LOG_MAX_BYTES:
+            return
+        try:
+            oldest = self.path.with_name(f"{self.path.name}.{_LOG_BACKUPS}")
+            oldest.unlink(missing_ok=True)
+            for index in range(_LOG_BACKUPS - 1, 0, -1):
+                source = self.path.with_name(f"{self.path.name}.{index}")
+                if source.exists():
+                    source.replace(self.path.with_name(f"{self.path.name}.{index + 1}"))
+            self.path.replace(self.path.with_name(f"{self.path.name}.1"))
+        except OSError:
+            # Another process or a virus scanner may briefly own the file. Keep
+            # serving requests; the next record will retry the bounded rollover.
+            return
 
 
 def _logs_root(app: Flask | None = None) -> Path:
@@ -26,16 +70,16 @@ def _logs_root(app: Flask | None = None) -> Path:
 def configure_operations_logging(app: Flask) -> None:
     """Write bounded server logs without exposing them outside the admin UI."""
     path = _logs_root(app) / "vedock.log"
+    shared_handler = ResilientOperationsHandler(path)
+    shared_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     for logger in (app.logger, logging.getLogger("waitress")):
-        for handler in list(logger.handlers):
-            if getattr(handler, "_vedock_operations_handler", False):
-                logger.removeHandler(handler)
-                handler.close()
-        handler = RotatingFileHandler(path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
-        handler._vedock_operations_handler = True  # type: ignore[attr-defined]
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-        logger.addHandler(handler)
+        for existing_handler in list(logger.handlers):
+            if getattr(existing_handler, "_vedock_operations_handler", False):
+                logger.removeHandler(existing_handler)
+                existing_handler.close()
+        logger.addHandler(shared_handler)
         logger.setLevel(logging.INFO)
+        logger.propagate = False
 
 
 def log_request(response: Any) -> Any:
